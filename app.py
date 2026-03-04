@@ -3,7 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 import bootstrap_path  # noqa: F401
-from alpha_app.config import FEED_PAGE_SIZE, MUNICIPALITY_NAME, REACTION_LABELS, STATUS_LABELS
+from alpha_app import config as app_config
 from alpha_app.ui.charts import (
     arch_abstain_summary_fig,
     arch_agent_confidence_fig,
@@ -33,6 +33,35 @@ from alpha_app.ui.charts import (
 )
 from alpha_app.ui.state import get_pipeline
 from alpha_app.ui.theme import apply_theme
+
+FEED_PAGE_SIZE = int(getattr(app_config, "FEED_PAGE_SIZE", 25))
+MUNICIPALITY_NAME = str(getattr(app_config, "MUNICIPALITY_NAME", "Municipality"))
+REACTION_LABELS = dict(
+    getattr(
+        app_config,
+        "REACTION_LABELS",
+        {
+            "like": "Like",
+            "dislike": "Dislike",
+            "love": "Love",
+            "angry": "Angry",
+            "sad": "Sad",
+            "wow": "Wow",
+        },
+    )
+)
+STATUS_LABELS = dict(
+    getattr(
+        app_config,
+        "STATUS_LABELS",
+        {
+            "planned": "Planned",
+            "active": "Active",
+            "delayed": "Delayed",
+            "completed": "Completed",
+        },
+    )
+)
 
 st.set_page_config(page_title="Civic Lens", page_icon="🏛️", layout="wide")
 apply_theme()
