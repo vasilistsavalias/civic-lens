@@ -52,6 +52,8 @@ def _comment_to_row(comment: CommentEvent) -> dict[str, Any]:
         "municipality_id": comment.municipality_id,
         "proposal_id": comment.proposal_id,
         "comment_id": comment.comment_id,
+        "parent_comment_id": comment.parent_comment_id,
+        "thread_depth": comment.thread_depth,
         "author_name": comment.author_name,
         "comment_text": comment.comment_text,
         "reactions": dict(comment.reactions),
@@ -63,6 +65,8 @@ def _comment_segment_row(comment: CommentEvent) -> dict[str, Any]:
     return {
         "comment_id": comment.comment_id,
         "proposal_id": comment.proposal_id,
+        "parent_comment_id": comment.parent_comment_id,
+        "thread_depth": comment.thread_depth,
         "segment_id": f"{comment.comment_id}_seg_001",
         "segment_index": 1,
         "segment_text": comment.comment_text,

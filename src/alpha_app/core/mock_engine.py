@@ -4,6 +4,7 @@ import re
 import unicodedata
 from datetime import datetime
 
+from alpha_app.config import MAX_THREAD_DEPTH
 from alpha_app.domain.models import CommentEvent, Stage1Result
 
 # Research-backed mock agent catalog used in Stage-1.
@@ -234,6 +235,12 @@ def validate_event(event: CommentEvent, known_proposal_ids: set[str]) -> None:
         raise ValueError(f"Unknown proposal_id: {event.proposal_id}")
     if event.submitted_at > datetime.utcnow():
         raise ValueError("submitted_at cannot be in the future.")
+    if event.thread_depth < 0:
+        raise ValueError("thread_depth cannot be negative.")
+    if event.thread_depth > MAX_THREAD_DEPTH:
+        raise ValueError(f"thread_depth exceeds MAX_THREAD_DEPTH={MAX_THREAD_DEPTH}.")
+    if event.parent_comment_id is None and event.thread_depth != 0:
+        raise ValueError("Top-level comments must have thread_depth=0.")
 
 
 def classify_stage1(event: CommentEvent) -> Stage1Result:

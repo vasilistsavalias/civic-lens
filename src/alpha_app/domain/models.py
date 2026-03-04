@@ -10,6 +10,9 @@ DashboardMode = Literal["basic", "advanced"]
 ProposalStatus = Literal["planned", "active", "delayed", "completed"]
 ServiceType = Literal["water", "electricity", "traffic", "waste", "telecom"]
 OffenseTarget = Literal["individual", "group", "untargeted", "unknown"]
+DiscussionSort = Literal["most_reacted", "newest", "most_relevant"]
+ModerationAction = Literal["flag", "hide", "escalate"]
+ModerationStatus = Literal["none", "flagged", "hidden", "escalated"]
 
 
 @dataclass(frozen=True)
@@ -45,6 +48,8 @@ class CommentEvent:
     comment_text: str
     reactions: dict[str, int]
     submitted_at: datetime
+    parent_comment_id: str | None = None
+    thread_depth: int = 0
 
 
 @dataclass(frozen=True)

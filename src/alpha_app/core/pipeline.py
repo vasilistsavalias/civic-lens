@@ -1,21 +1,34 @@
 ﻿from __future__ import annotations
 
+import math
+import random
 from collections import Counter, defaultdict
 from dataclasses import asdict, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from itertools import count
 from pathlib import Path
 
-from alpha_app.config import MUNICIPALITY_ID, REACTION_KEYS
+from alpha_app.config import (
+    FEED_PAGE_SIZE,
+    LEGACY_REACTION_KEY_MAP,
+    MOST_RELEVANT_WEIGHTS_V1,
+    MUNICIPALITY_ID,
+    MAX_THREAD_DEPTH,
+    REACTION_KEYS,
+    REACTION_WEIGHTS_V1,
+)
 from alpha_app.core.artifacts import PipelineArtifacts
 from alpha_app.core.calibration import brier_proxy, calibrate_scores, ece_proxy, mean_entropy
 from alpha_app.core.mock_engine import classify_stage1, validate_event
-from alpha_app.core.proposals import PROPOSALS, SEEDED_COMMENTS
+from alpha_app.core.proposals import PROPOSALS
 from alpha_app.core.review import apply_mock_reviewer_pass
 from alpha_app.domain.models import (
     CommentEvent,
     DashboardOverviewSeries,
     DashboardProposalSeries,
+    DiscussionSort,
+    ModerationAction,
+    ModerationStatus,
     Proposal,
     ProposalCardViewModel,
     ProposalExpandedViewModel,
@@ -32,11 +45,15 @@ class AlphaPipeline:
         emit_artifacts: bool = False,
         artifact_root: Path | str | None = None,
         run_id: str | None = None,
+        top_level_per_proposal: int = 100,
+        seed: int = 2026,
     ) -> None:
         proposal_list = proposals or PROPOSALS
         self.proposals = {p.proposal_id: p for p in proposal_list}
         self.pending_events: list[CommentEvent] = []
         self.comments: list[CommentEvent] = []
+        self.comment_index: dict[str, CommentEvent] = {}
+        self.children_by_parent: dict[str, list[str]] = defaultdict(list)
         self.stage1_results: dict[str, Stage1Result] = {}
         self.stage2_insights: dict[str, Stage2Insight] = {}
         self.review_initial_rows: dict[str, list[dict[str, object]]] = {}
@@ -44,6 +61,8 @@ class AlphaPipeline:
         self.review_corrections: dict[str, list[dict[str, object]]] = {}
         self.review_metrics: dict[str, dict[str, object]] = {}
         self.reaction_totals: dict[str, dict[str, int]] = defaultdict(lambda: {k: 0 for k in REACTION_KEYS})
+        self.moderation_state: dict[str, dict[str, object]] = {}
+        self._moderation_events: dict[str, list[dict[str, object]]] = defaultdict(list)
         self._dirty_proposals: set[str] = set()
         self._id_counter = count(1)
 
@@ -52,9 +71,8 @@ class AlphaPipeline:
         self.queue_snapshots: list[dict[str, object]] = []
         self.store_snapshots: list[dict[str, object]] = []
         self.scheduler_triggers: list[dict[str, object]] = []
-        self.calibration_metrics: list[dict[str, object]] = []
-        self.abstain_summary: list[dict[str, object]] = []
-        self.conflict_summary: list[dict[str, object]] = []
+        self._top_level_per_proposal = max(1, int(top_level_per_proposal))
+        self._seed = int(seed)
         self._artifact_store = PipelineArtifacts(root=artifact_root, run_id=run_id) if emit_artifacts else None
         self.seed_demo_data()
 
@@ -76,25 +94,60 @@ class AlphaPipeline:
             }
         )
 
+    def _normalize_reactions(self, reactions: dict[str, int] | None) -> dict[str, int]:
+        normalized = {k: 0 for k in REACTION_KEYS}
+        for key, value in (reactions or {}).items():
+            canonical = key
+            if canonical not in REACTION_KEYS:
+                canonical = LEGACY_REACTION_KEY_MAP.get(canonical, canonical)
+            if canonical in REACTION_KEYS:
+                normalized[canonical] += max(0, int(value))
+        return normalized
+
+    def _reaction_scores(self, reactions: dict[str, int]) -> tuple[int, float, float]:
+        total_reacts = sum(reactions.values())
+        signed_raw = 0.0
+        for key, count in reactions.items():
+            signed_raw += REACTION_WEIGHTS_V1.get(key, 0.0) * float(count)
+        signed_norm = math.tanh(signed_raw / max(1.0, float(total_reacts)))
+        return total_reacts, round(signed_raw, 3), round(signed_norm, 3)
+
     def submit_comment(
         self,
         proposal_id: str,
         comment_text: str,
         reactions: dict[str, int] | None = None,
         *,
-        author_name: str = "Κάτοικος",
+        author_name: str = "Resident",
         comment_id: str | None = None,
         submitted_at: datetime | None = None,
+        parent_comment_id: str | None = None,
+        thread_depth: int | None = None,
     ) -> CommentEvent:
-        normalized_reactions = {k: max(0, int((reactions or {}).get(k, 0))) for k in REACTION_KEYS}
+        normalized_reactions = self._normalize_reactions(reactions)
+
+        if parent_comment_id is not None:
+            parent = self.comment_index.get(parent_comment_id)
+            if parent is None:
+                raise ValueError(f"Unknown parent_comment_id: {parent_comment_id}")
+            inferred_depth = parent.thread_depth + 1
+            if thread_depth is None:
+                thread_depth = inferred_depth
+            elif thread_depth != inferred_depth:
+                raise ValueError("thread_depth must equal parent.thread_depth + 1")
+        else:
+            thread_depth = 0 if thread_depth is None else thread_depth
+
         event = CommentEvent(
             municipality_id=MUNICIPALITY_ID,
             proposal_id=proposal_id,
-            comment_id=comment_id or f"c_{next(self._id_counter):04d}",
+            comment_id=comment_id or f"c_{next(self._id_counter):05d}",
             author_name=author_name,
             comment_text=comment_text,
             reactions=normalized_reactions,
             submitted_at=submitted_at or datetime.utcnow(),
+            parent_comment_id=parent_comment_id,
+            thread_depth=thread_depth,
         )
         try:
             validate_event(event, set(self.proposals))
@@ -107,8 +160,17 @@ class AlphaPipeline:
 
         self.pending_events.append(event)
         self.comments.append(event)
+        self.comment_index[event.comment_id] = event
+        if parent_comment_id is not None:
+            self.children_by_parent[parent_comment_id].append(event.comment_id)
         for key, value in normalized_reactions.items():
             self.reaction_totals[proposal_id][key] += value
+        self.moderation_state[event.comment_id] = {
+            "moderation_status": "none",
+            "moderation_reason": None,
+            "moderated_by": None,
+            "moderated_at": None,
+        }
         self._dirty_proposals.add(proposal_id)
         self._snapshot_queue(processed_in_batch=0)
         self._emit_ingestion_artifacts(proposal_id)
@@ -117,15 +179,140 @@ class AlphaPipeline:
     def seed_demo_data(self) -> None:
         if self.comments:
             return
-        for proposal_id, entries in SEEDED_COMMENTS.items():
-            for entry in entries:
-                self.submit_comment(
+        self.generate_mock_discussion(top_level_per_proposal=self._top_level_per_proposal, seed=self._seed)
+
+    def _reset_generated_state(self) -> None:
+        self.pending_events.clear()
+        self.comments.clear()
+        self.comment_index.clear()
+        self.children_by_parent.clear()
+        self.stage1_results.clear()
+        self.stage2_insights.clear()
+        self.review_initial_rows.clear()
+        self.review_final_rows.clear()
+        self.review_corrections.clear()
+        self.review_metrics.clear()
+        self.reaction_totals = defaultdict(lambda: {k: 0 for k in REACTION_KEYS})
+        self.moderation_state.clear()
+        self._moderation_events.clear()
+        self._dirty_proposals.clear()
+        self._id_counter = count(1)
+        self.validation_stats = {"pass": 0, "fail": 0}
+        self.validation_timeline.clear()
+        self.queue_snapshots.clear()
+        self.store_snapshots.clear()
+        self.scheduler_triggers.clear()
+
+    def generate_mock_discussion(self, top_level_per_proposal: int = 100, seed: int = 2026) -> None:
+        self._reset_generated_state()
+        rng = random.Random(seed)
+        base = datetime(2026, 1, 15, 8, 0, 0)
+        authors = ["Maria", "Nikos", "Eleni", "George", "Anna", "Sofia", "Dimitris", "Katerina", "John", "Alex"]
+        stance_templates = {
+            "support": [
+                "I support this plan because it improves daily mobility and public life.",
+                "Very positive direction, please keep transparent milestones and budget updates.",
+                "Good civic move if maintenance and safety are guaranteed.",
+            ],
+            "against": [
+                "I disagree unless traffic alternatives are ready first.",
+                "This sounds risky for access and local business operations.",
+                "I am worried this will fail without proper implementation details.",
+            ],
+            "mixed": [
+                "I agree in principle, but we need clear timelines and measurable goals.",
+                "Interesting proposal, however execution quality will decide the outcome.",
+                "Support with conditions: evidence, accountability, and fairness.",
+            ],
+            "irony": [
+                "Yeah right, because all previous promises worked perfectly /s.",
+                "Great, another magical solution with zero delays, sure.",
+            ],
+            "harsh_evidence": [
+                "This is badly designed; data from district reports show current capacity is insufficient.",
+                "Harsh truth: the budget ratio is off, and the published figures do not align.",
+            ],
+            "offtopic": [
+                "Unrelated note: weather was terrible today and buses were late.",
+                "Not about this proposal, but city noise at night keeps increasing.",
+            ],
+        }
+        proposal_context = {
+            "deth_park": "park and green space",
+            "nikis_pedestrian": "waterfront pedestrian corridor",
+            "metro_west": "west metro expansion",
+        }
+        reply_prob = {1: 0.45, 2: 0.20, 3: 0.08}
+
+        def build_reactions(kind: str) -> dict[str, int]:
+            if kind == "support":
+                return {"like": rng.randint(6, 40), "love": rng.randint(5, 30), "wow": rng.randint(1, 12), "angry": rng.randint(0, 4), "sad": rng.randint(0, 3), "dislike": rng.randint(0, 5)}
+            if kind == "against":
+                return {"like": rng.randint(1, 12), "love": rng.randint(0, 6), "wow": rng.randint(0, 6), "angry": rng.randint(4, 24), "sad": rng.randint(2, 14), "dislike": rng.randint(5, 22)}
+            if kind == "irony":
+                return {"like": rng.randint(0, 10), "love": rng.randint(0, 8), "wow": rng.randint(2, 12), "angry": rng.randint(1, 16), "sad": rng.randint(0, 8), "dislike": rng.randint(1, 12)}
+            if kind == "harsh_evidence":
+                return {"like": rng.randint(3, 20), "love": rng.randint(1, 10), "wow": rng.randint(1, 9), "angry": rng.randint(2, 18), "sad": rng.randint(1, 12), "dislike": rng.randint(2, 15)}
+            if kind == "offtopic":
+                return {"like": rng.randint(0, 8), "love": rng.randint(0, 6), "wow": rng.randint(0, 5), "angry": rng.randint(0, 8), "sad": rng.randint(0, 7), "dislike": rng.randint(0, 7)}
+            return {"like": rng.randint(2, 18), "love": rng.randint(1, 12), "wow": rng.randint(0, 8), "angry": rng.randint(0, 10), "sad": rng.randint(0, 9), "dislike": rng.randint(0, 9)}
+
+        def pick_kind() -> str:
+            roll = rng.random()
+            if roll < 0.28:
+                return "support"
+            if roll < 0.54:
+                return "against"
+            if roll < 0.76:
+                return "mixed"
+            if roll < 0.84:
+                return "irony"
+            if roll < 0.92:
+                return "harsh_evidence"
+            return "offtopic"
+
+        def build_text(kind: str, proposal_id: str) -> str:
+            prefix = proposal_context.get(proposal_id, "city proposal")
+            phrase = rng.choice(stance_templates[kind])
+            language_switch = "" if rng.random() < 0.82 else " We need clear civic governance and accountability."
+            return f"[{prefix}] {phrase}{language_switch}"
+
+        def add_replies(parent: CommentEvent, proposal_id: str, depth: int, ts: datetime) -> None:
+            if depth > MAX_THREAD_DEPTH:
+                return
+            if rng.random() > reply_prob.get(depth, 0.0):
+                return
+            n_replies = 1 + (1 if rng.random() < 0.35 else 0)
+            for idx in range(n_replies):
+                kind = pick_kind()
+                reply_ts = ts + timedelta(minutes=2 + idx + rng.randint(0, 4))
+                reply = self.submit_comment(
                     proposal_id=proposal_id,
-                    comment_text=str(entry["text"]),
-                    reactions=dict(entry["reactions"]),
-                    author_name=str(entry["author"]),
-                    submitted_at=entry["submitted_at"],  # type: ignore[arg-type]
+                    comment_text=f"Reply: {build_text(kind, proposal_id)}",
+                    reactions=build_reactions(kind),
+                    author_name=rng.choice(authors),
+                    submitted_at=reply_ts,
+                    parent_comment_id=parent.comment_id,
+                    thread_depth=depth,
                 )
+                add_replies(reply, proposal_id, depth + 1, reply_ts)
+
+        for proposal_idx, proposal_id in enumerate(self.proposals):
+            offset = proposal_idx * 20_000
+            for i in range(top_level_per_proposal):
+                kind = pick_kind()
+                ts = base + timedelta(minutes=offset + i * 7 + rng.randint(0, 4))
+                top = self.submit_comment(
+                    proposal_id=proposal_id,
+                    comment_text=build_text(kind, proposal_id),
+                    reactions=build_reactions(kind),
+                    author_name=rng.choice(authors),
+                    submitted_at=ts,
+                    parent_comment_id=None,
+                    thread_depth=0,
+                )
+                add_replies(top, proposal_id, depth=1, ts=ts)
+
         for proposal_id in self.proposals:
             self._ensure_fresh(proposal_id)
         self._snapshot_store()
@@ -265,7 +452,7 @@ class AlphaPipeline:
             comments = [c for c in self.comments if c.proposal_id == proposal_id]
             reactions = self.reaction_totals[proposal_id]
             total_reactions = sum(reactions.values())
-            support_ratio = 0.0 if total_reactions == 0 else round((reactions["likes"] + reactions["support"]) / total_reactions, 2)
+            support_ratio = 0.0 if total_reactions == 0 else round((reactions["like"] + reactions["love"]) / total_reactions, 2)
             cards.append(
                 ProposalCardViewModel(
                     proposal_id=proposal_id,
@@ -279,6 +466,202 @@ class AlphaPipeline:
                 )
             )
         return cards
+
+    def _sort_score(self, comment: CommentEvent, sort: DiscussionSort, newest_ts: float) -> tuple[float, float, float]:
+        total_reacts, signed_raw, signed_norm = self._reaction_scores(comment.reactions)
+        comment_ts = comment.submitted_at.timestamp()
+        if sort == "newest":
+            return (comment_ts, total_reacts, abs(signed_raw))
+        if sort == "most_reacted":
+            return (float(total_reacts), comment_ts, abs(signed_raw))
+
+        hours_ago = max(0.0, (newest_ts - comment_ts) / 3600.0)
+        recency_score = 1.0 / (1.0 + hours_ago / 24.0)
+        engagement_score = min(1.0, total_reacts / 40.0)
+        polarity_score = min(1.0, abs(signed_norm))
+        relevance = (
+            MOST_RELEVANT_WEIGHTS_V1["engagement"] * engagement_score
+            + MOST_RELEVANT_WEIGHTS_V1["polarity"] * polarity_score
+            + MOST_RELEVANT_WEIGHTS_V1["recency"] * recency_score
+        )
+        return (relevance, float(total_reacts), comment_ts)
+
+    def _feed_candidates(
+        self,
+        proposal_id: str,
+        *,
+        include_replies: bool,
+        filters: dict[str, object] | None,
+    ) -> list[CommentEvent]:
+        self._ensure_fresh(proposal_id)
+        flt = filters or {}
+        show_hidden = bool(flt.get("show_hidden", False))
+        view = str(flt.get("view", "all"))
+        candidates = [c for c in self.comments if c.proposal_id == proposal_id]
+
+        if not include_replies or view == "top_level":
+            candidates = [c for c in candidates if c.thread_depth == 0]
+        if view == "needs_review":
+            candidates = [c for c in candidates if (self.stage1_results.get(c.comment_id) and self.stage1_results[c.comment_id].review_reason_codes)]
+        if not show_hidden:
+            candidates = [c for c in candidates if self.moderation_state.get(c.comment_id, {}).get("moderation_status") != "hidden"]
+        return candidates
+
+    def discussion_total_count(
+        self,
+        proposal_id: str,
+        *,
+        include_replies: bool = True,
+        filters: dict[str, object] | None = None,
+    ) -> int:
+        return len(self._feed_candidates(proposal_id, include_replies=include_replies, filters=filters))
+
+    def discussion_feed(
+        self,
+        proposal_id: str,
+        sort: DiscussionSort = "most_reacted",
+        include_replies: bool = True,
+        page: int = 1,
+        page_size: int = FEED_PAGE_SIZE,
+        filters: dict[str, object] | None = None,
+    ) -> list[dict[str, object]]:
+        candidates = self._feed_candidates(proposal_id, include_replies=include_replies, filters=filters)
+        selected_ids = {c.comment_id for c in candidates}
+        if not candidates:
+            return []
+
+        newest_ts = max(c.submitted_at.timestamp() for c in candidates)
+
+        def sorted_ids(comment_ids: list[str]) -> list[str]:
+            return sorted(comment_ids, key=lambda cid: self._sort_score(self.comment_index[cid], sort, newest_ts), reverse=True)
+
+        top_ids = [c.comment_id for c in candidates if c.parent_comment_id is None or c.parent_comment_id not in selected_ids]
+        ordered: list[str] = []
+
+        def visit(comment_id: str) -> None:
+            ordered.append(comment_id)
+            if not include_replies:
+                return
+            child_ids = [cid for cid in self.children_by_parent.get(comment_id, []) if cid in selected_ids]
+            for child_id in sorted_ids(child_ids):
+                visit(child_id)
+
+        for root_id in sorted_ids(top_ids):
+            visit(root_id)
+
+        page = max(1, int(page))
+        page_size = max(1, int(page_size))
+        start = (page - 1) * page_size
+        end = start + page_size
+        rows: list[dict[str, object]] = []
+
+        for comment_id in ordered[start:end]:
+            comment = self.comment_index[comment_id]
+            result = self.stage1_results.get(comment_id)
+            total_reacts, signed_raw, signed_norm = self._reaction_scores(comment.reactions)
+            state = self.moderation_state.get(comment_id, {"moderation_status": "none", "moderation_reason": None, "moderated_by": None, "moderated_at": None})
+            rows.append(
+                {
+                    "comment_id": comment.comment_id,
+                    "proposal_id": comment.proposal_id,
+                    "parent_comment_id": comment.parent_comment_id,
+                    "thread_depth": comment.thread_depth,
+                    "author_name": comment.author_name,
+                    "submitted_at": comment.submitted_at.strftime("%Y-%m-%d %H:%M"),
+                    "comment_text": comment.comment_text,
+                    "reaction_breakdown": dict(comment.reactions),
+                    "total_reacts": total_reacts,
+                    "signed_score_raw": signed_raw,
+                    "signed_score_norm": signed_norm,
+                    "reply_count": len(self.children_by_parent.get(comment.comment_id, [])),
+                    "sentiment": result.sentiment if result else "neutral",
+                    "stance": result.stance if result else "neutral",
+                    "quality": result.argument_quality_score if result else 0.0,
+                    "irony_flag": result.irony_flag if result else False,
+                    "emotion_scores": dict(result.emotion_scores) if result else {},
+                    "emotion_intensity": float(result.emotion_intensity) if result else 0.0,
+                    "toxicity_score": float(result.agent_scores.get("toxicity", 0.0)) if result else 0.0,
+                    "civility_score": float(result.agent_scores.get("civility", 0.0)) if result else 0.0,
+                    "profanity_score": float(result.agent_scores.get("profanity", 0.0)) if result else 0.0,
+                    "review_reason_codes": list(result.review_reason_codes) if result else [],
+                    "conflict_flags": list(result.conflict_flags) if result else [],
+                    "abstain_flags": dict(result.abstain_flags) if result else {},
+                    "moderation_status": state["moderation_status"],
+                    "moderation_reason": state["moderation_reason"],
+                    "moderated_by": state["moderated_by"],
+                    "moderated_at": state["moderated_at"],
+                }
+            )
+        return rows
+
+    def apply_moderation_action(
+        self,
+        comment_id: str,
+        action: ModerationAction,
+        actor: str,
+        reason: str,
+    ) -> dict[str, object]:
+        if comment_id not in self.comment_index:
+            raise ValueError(f"Unknown comment_id: {comment_id}")
+        comment = self.comment_index[comment_id]
+        previous = self.moderation_state.get(comment_id, {"moderation_status": "none", "moderation_reason": None, "moderated_by": None, "moderated_at": None})
+        next_status: ModerationStatus = {"flag": "flagged", "hide": "hidden", "escalate": "escalated"}[action]
+        now_iso = datetime.utcnow().isoformat(timespec="seconds")
+        updated = {
+            "moderation_status": next_status,
+            "moderation_reason": reason.strip() or action,
+            "moderated_by": actor,
+            "moderated_at": now_iso,
+        }
+        self.moderation_state[comment_id] = updated
+        self._moderation_events[comment.proposal_id].append(
+            {
+                "comment_id": comment_id,
+                "proposal_id": comment.proposal_id,
+                "action": action,
+                "previous_status": previous["moderation_status"],
+                "new_status": next_status,
+                "reason": updated["moderation_reason"],
+                "actor": actor,
+                "created_at": now_iso,
+            }
+        )
+        return dict(updated)
+
+    def moderation_log(self, proposal_id: str) -> list[dict[str, object]]:
+        return list(self._moderation_events.get(proposal_id, []))
+
+    def proposal_action_metrics(self, proposal_id: str) -> dict[str, object]:
+        self._ensure_fresh(proposal_id)
+        comments = [c for c in self.comments if c.proposal_id == proposal_id]
+        results = [self.stage1_results[c.comment_id] for c in comments if c.comment_id in self.stage1_results]
+        if not comments:
+            return {
+                "participation_volume": 0,
+                "support_opposition_index": 0.0,
+                "civility_risk_rate": 0.0,
+                "review_queue_pressure": 0.0,
+                "top_concern_clusters": [],
+            }
+
+        top_level_count = len([c for c in comments if c.thread_depth == 0])
+        reactions = self.reaction_totals[proposal_id]
+        total_reacts, signed_raw, signed_norm = self._reaction_scores(reactions)
+        civility_risk = len([r for r in results if float(r.agent_scores.get("toxicity", 0.0)) >= 0.45])
+        review_need = len([r for r in results if r.review_reason_codes])
+        tags = Counter()
+        for result in results:
+            for tag in result.tags:
+                tags.update([tag])
+        return {
+            "participation_volume": top_level_count,
+            "support_opposition_index": round(signed_norm, 3),
+            "support_opposition_raw": signed_raw,
+            "total_reacts": total_reacts,
+            "civility_risk_rate": round(civility_risk / max(1, len(results)), 3),
+            "review_queue_pressure": round(review_need / max(1, len(results)), 3),
+            "top_concern_clusters": [{"topic": topic, "count": count} for topic, count in tags.most_common(5)],
+        }
 
     def build_dashboard_data(
         self,
@@ -304,7 +687,7 @@ class AlphaPipeline:
             reviewed = self.review_final_rows.get(pid, [])
             reactions = self.reaction_totals[pid]
             total_reactions = sum(reactions.values())
-            support_ratio = 0.0 if total_reactions == 0 else (reactions["likes"] + reactions["support"]) / total_reactions
+            support_ratio = 0.0 if total_reactions == 0 else (reactions["like"] + reactions["love"]) / total_reactions
 
             comparison_rows.append({"proposal_id": pid, "title": proposal.title, "comments_total": len(comments), "total_reactions": total_reactions, "support_ratio": round(support_ratio, 2)})
 
@@ -517,22 +900,30 @@ class AlphaPipeline:
         }
 
     def comments_for_proposal(self, proposal_id: str) -> list[dict[str, object]]:
-        rows: list[dict[str, object]] = []
-        by_comment = {r.comment_id: r for r in self.stage1_results.values() if r.proposal_id == proposal_id}
-        for comment in sorted([c for c in self.comments if c.proposal_id == proposal_id], key=lambda c: c.submitted_at, reverse=True):
-            result = by_comment.get(comment.comment_id)
-            rows.append(
-                {
-                    "author_name": comment.author_name,
-                    "submitted_at": comment.submitted_at.strftime("%Y-%m-%d %H:%M"),
-                    "comment_text": comment.comment_text,
-                    "reactions_total": sum(comment.reactions.values()),
-                    "sentiment": result.sentiment if result else "neutral",
-                    "stance": result.stance if result else "neutral",
-                    "quality": result.argument_quality_score if result else 0.0,
-                }
-            )
-        return rows
+        rows = self.discussion_feed(
+            proposal_id,
+            sort="newest",
+            include_replies=True,
+            page=1,
+            page_size=100000,
+            filters={"show_hidden": True},
+        )
+        return [
+            {
+                "comment_id": row["comment_id"],
+                "author_name": row["author_name"],
+                "submitted_at": row["submitted_at"],
+                "comment_text": row["comment_text"],
+                "reactions_total": row["total_reacts"],
+                "sentiment": row["sentiment"],
+                "stance": row["stance"],
+                "quality": row["quality"],
+                "thread_depth": row["thread_depth"],
+                "parent_comment_id": row["parent_comment_id"],
+                "moderation_status": row["moderation_status"],
+            }
+            for row in rows
+        ]
 
     def dashboard_payload(self, mode: str = "basic") -> dict[str, object]:
         overview, proposal_series = self.build_dashboard_data(mode=mode)
