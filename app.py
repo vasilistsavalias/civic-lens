@@ -35,18 +35,18 @@ from alpha_app.ui.state import get_pipeline
 from alpha_app.ui.theme import apply_theme
 
 FEED_PAGE_SIZE = int(getattr(app_config, "FEED_PAGE_SIZE", 25))
-MUNICIPALITY_NAME = str(getattr(app_config, "MUNICIPALITY_NAME", "Municipality"))
+MUNICIPALITY_NAME = str(getattr(app_config, "MUNICIPALITY_NAME", "Δήμος"))
 REACTION_LABELS = dict(
     getattr(
         app_config,
         "REACTION_LABELS",
         {
-            "like": "Like",
-            "dislike": "Dislike",
-            "love": "Love",
-            "angry": "Angry",
-            "sad": "Sad",
-            "wow": "Wow",
+            "like": "Μου αρέσει",
+            "dislike": "Δεν μου αρέσει",
+            "love": "Τέλειο",
+            "angry": "Θυμός",
+            "sad": "Λύπη",
+            "wow": "Έκπληξη",
         },
     )
 )
@@ -55,10 +55,10 @@ STATUS_LABELS = dict(
         app_config,
         "STATUS_LABELS",
         {
-            "planned": "Planned",
-            "active": "Active",
-            "delayed": "Delayed",
-            "completed": "Completed",
+            "planned": "Σχεδιασμένο",
+            "active": "Ενεργό",
+            "delayed": "Καθυστερημένο",
+            "completed": "Ολοκληρωμένο",
         },
     )
 )
@@ -73,24 +73,29 @@ if "selected_proposal_id" not in st.session_state:
     st.session_state["selected_proposal_id"] = None
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
-if "auth_user" not in st.session_state:
-    st.session_state["auth_user"] = AUTH_USER
+
+
+def _info_title(title: str, tip: str) -> None:
+    safe_tip = tip.replace("'", "&#39;")
+    st.markdown(
+        f"<div class='section-title'>{title}<span class='info-icon' title='{safe_tip}'>i</span></div>",
+        unsafe_allow_html=True,
+    )
 
 
 def render_login() -> None:
-    st.title("Civic Lens Login")
-    st.caption("Demo authentication for supervisor view.")
+    st.title("Είσοδος στην πλατφόρμα")
+    st.caption("Προστασία πρόσβασης για παρουσίαση blueprint.")
     with st.form("login_form", clear_on_submit=False):
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        submit = st.form_submit_button("Sign in", use_container_width=True)
+        username = st.text_input("Χρήστης")
+        password = st.text_input("Κωδικός", type="password")
+        submit = st.form_submit_button("Σύνδεση", use_container_width=True)
     if submit:
         if username == AUTH_USER and password == AUTH_PASSWORD:
             st.session_state["authenticated"] = True
-            st.session_state["auth_user"] = username
             st.rerun()
         else:
-            st.error("Invalid credentials.")
+            st.error("Λάθος στοιχεία πρόσβασης.")
 
 
 if not st.session_state["authenticated"]:
@@ -101,7 +106,7 @@ pipeline = get_pipeline()
 
 
 def render_cards() -> None:
-    st.subheader("Proposal Cards")
+    st.subheader("Αναρτήσεις Δήμου")
     cards = pipeline.get_card_summaries()
     cols = st.columns(3, gap="large")
     for idx, card in enumerate(cards):
@@ -112,16 +117,16 @@ def render_cards() -> None:
                   <div class="proposal-title">{card.title}</div>
                   <div class="proposal-caption">{card.short_description}</div>
                   <div style="margin-top:0.65rem;">
-                    <span class="chip">{STATUS_LABELS[card.status]}</span>
-                    <span class="chip">{card.comments_total} comments</span>
-                    <span class="chip">{card.total_reactions} reactions</span>
-                    <span class="chip">support {int(card.support_ratio * 100)}%</span>
+                    <span class="chip">{STATUS_LABELS.get(card.status, card.status)}</span>
+                    <span class="chip">{card.comments_total} σχόλια</span>
+                    <span class="chip">{card.total_reactions} αντιδράσεις</span>
+                    <span class="chip">υποστήριξη {int(card.support_ratio * 100)}%</span>
                   </div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
-            if st.button("Open", key=f"open_{card.proposal_id}", use_container_width=True):
+            if st.button("Άνοιγμα ανάρτησης", key=f"open_{card.proposal_id}", use_container_width=True):
                 st.session_state["selected_proposal_id"] = card.proposal_id
 
 
@@ -130,70 +135,97 @@ def _reaction_text(breakdown: dict[str, int]) -> str:
     for key, label in REACTION_LABELS.items():
         value = int(breakdown.get(key, 0))
         if value > 0:
-            parts.append(f"{label} {value}")
-    return " | ".join(parts) if parts else "No reactions"
+            parts.append(f"{label}: {value}")
+    return " | ".join(parts) if parts else "Χωρίς αντιδράσεις"
+
+
+def _render_municipal_post(expanded) -> None:
+    proposal = expanded.proposal
+    with st.container(border=True):
+        st.markdown(f"### Ανάρτηση Δήμου: {proposal.title}")
+        c1, c2 = st.columns([1.1, 1.8], gap="large")
+        with c1:
+            st.image(proposal.image_url, use_container_width=True)
+        with c2:
+            st.caption(f"{MUNICIPALITY_NAME} · Δημοσίευση πολιτικής πρότασης")
+            st.markdown(proposal.long_description)
+            st.caption(
+                f"Περίοδος: {proposal.start_date.isoformat()} έως {proposal.end_date.isoformat()} · "
+                f"Προϋπολογισμός: {proposal.budget_eur:,.0f} EUR"
+            )
+            st.markdown("**Σύνδεσμοι**")
+            for link in proposal.links:
+                st.markdown(f"- [{link.label}]({link.url})")
 
 
 def render_discussion_workspace(proposal_id: str) -> None:
     expanded = pipeline.open_card(proposal_id)
-    proposal = expanded.proposal
     page_key = f"feed_page_{proposal_id}"
     if page_key not in st.session_state:
         st.session_state[page_key] = 1
 
-    st.markdown(f"### {proposal.title}")
-    st.caption(proposal.short_description)
+    _render_municipal_post(expanded)
 
-    control_left, control_right = st.columns([2.2, 1.0])
-    with control_left:
-        c1, c2, c3, c4 = st.columns([1.0, 1.0, 1.0, 1.1])
-        with c1:
-            sort = st.selectbox("Sort", ["most_reacted", "newest", "most_relevant"], index=0, key=f"sort_{proposal_id}")
-        with c2:
-            view = st.selectbox("View", ["all", "top_level", "needs_review"], index=0, key=f"view_{proposal_id}")
-        with c3:
-            include_replies = st.toggle("Include replies", value=True, key=f"replies_{proposal_id}")
-        with c4:
-            show_hidden = st.toggle("Show hidden", value=False, key=f"hidden_{proposal_id}")
-    with control_right:
-        st.write("")
-        if st.button("Reset pagination", key=f"reset_page_{proposal_id}", use_container_width=True):
+    sort_options = {
+        "Πιο δημοφιλή": "most_reacted",
+        "Νεότερα": "newest",
+        "Πιο σχετικά": "most_relevant",
+    }
+    view_options = {
+        "Όλα": "all",
+        "Μόνο αρχικά σχόλια": "top_level",
+        "Χρειάζονται έλεγχο": "needs_review",
+    }
+
+    c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.0, 1.0])
+    with c1:
+        sort_label = st.selectbox("Ταξινόμηση", list(sort_options.keys()), index=0, key=f"sort_{proposal_id}")
+    with c2:
+        view_label = st.selectbox("Προβολή", list(view_options.keys()), index=0, key=f"view_{proposal_id}")
+    with c3:
+        include_replies = st.toggle("Εμφάνιση απαντήσεων", value=True, key=f"replies_{proposal_id}")
+    with c4:
+        if st.button("Επαναφορά σελίδας", key=f"reset_page_{proposal_id}", use_container_width=True):
             st.session_state[page_key] = 1
             st.rerun()
 
-    active_filters = {"view": view, "show_hidden": show_hidden}
-    loaded_rows = pipeline.discussion_feed(
+    active_filters = {"view": view_options[view_label], "show_hidden": False}
+    rows = pipeline.discussion_feed(
         proposal_id,
-        sort=sort,  # type: ignore[arg-type]
+        sort=sort_options[sort_label],  # type: ignore[arg-type]
         include_replies=include_replies,
         page=1,
         page_size=st.session_state[page_key] * FEED_PAGE_SIZE,
         filters=active_filters,
     )
     total_rows = pipeline.discussion_total_count(proposal_id, include_replies=include_replies, filters=active_filters)
+    author_by_id = {row["comment_id"]: row["author_name"] for row in rows}
 
-    left, right = st.columns([1.95, 1.05], gap="large")
+    left, right = st.columns([2.0, 1.0], gap="large")
     with left:
-        st.markdown("#### Discussion Feed")
-        st.caption(f"Loaded {len(loaded_rows)} / {total_rows} rows")
-
-        for row in loaded_rows:
+        st.markdown("#### Συζήτηση κατοίκων")
+        st.caption(f"Εμφανίζονται {len(rows)} από {total_rows} σχόλια/απαντήσεις")
+        for row in rows:
             depth = int(row["thread_depth"])
-            margin_left = depth * 24
-            status_chip = row["moderation_status"]
-            reasons = ", ".join(row["review_reason_codes"]) if row["review_reason_codes"] else "None"
+            parent_id = row["parent_comment_id"]
+            parent_author = author_by_id.get(parent_id, "κάτοικο") if parent_id else None
+            margin_left = depth * 26
             st.markdown(f"<div style='margin-left:{margin_left}px'>", unsafe_allow_html=True)
             with st.container(border=True):
+                if parent_id:
+                    st.caption(f"↳ Απάντηση σε σχόλιο του/της {parent_author}")
                 st.markdown(
-                    f"**{row['author_name']}** · {row['submitted_at']} · status: `{status_chip}` · reacts: `{row['total_reacts']}` · raw score: `{row['signed_score_raw']}`"
+                    f"**{row['author_name']}** · {row['submitted_at']} · "
+                    f"αντιδράσεις: `{row['total_reacts']}` · ένταση: `{row['signed_score_raw']}`"
                 )
                 st.write(row["comment_text"])
                 st.caption(_reaction_text(row["reaction_breakdown"]))
+                reasons = ", ".join(row["review_reason_codes"]) if row["review_reason_codes"] else "Καμία"
                 st.caption(
-                    f"Sentiment: {row['sentiment']} | Stance: {row['stance']} | Quality: {row['quality']:.2f} | Review reasons: {reasons}"
+                    f"Συναίσθημα: {row['sentiment']} | Στάση: {row['stance']} | "
+                    f"Ποιότητα: {row['quality']:.2f} | Λόγοι ελέγχου: {reasons}"
                 )
-
-                with st.expander("Analysis details", expanded=False):
+                with st.expander("Ανάλυση σχολίου", expanded=False):
                     st.write(
                         {
                             "emotion_scores": row["emotion_scores"],
@@ -206,148 +238,142 @@ def render_discussion_workspace(proposal_id: str) -> None:
                             "abstain_flags": row["abstain_flags"],
                         }
                     )
-
-                reason_key = f"reason_{row['comment_id']}"
-                default_reason = f"Supervisor {row['moderation_status']} action"
-                reason = st.text_input("Action reason", key=reason_key, value=default_reason, label_visibility="collapsed")
-                a1, a2, a3 = st.columns(3)
-                with a1:
-                    if st.button("Flag", key=f"flag_{row['comment_id']}", use_container_width=True):
-                        pipeline.apply_moderation_action(str(row["comment_id"]), "flag", st.session_state["auth_user"], reason)
-                        st.rerun()
-                with a2:
-                    if st.button("Hide", key=f"hide_{row['comment_id']}", use_container_width=True):
-                        pipeline.apply_moderation_action(str(row["comment_id"]), "hide", st.session_state["auth_user"], reason)
-                        st.rerun()
-                with a3:
-                    if st.button("Escalate", key=f"esc_{row['comment_id']}", use_container_width=True):
-                        pipeline.apply_moderation_action(str(row["comment_id"]), "escalate", st.session_state["auth_user"], reason)
-                        st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
-        if len(loaded_rows) < total_rows:
-            if st.button("Load more", key=f"load_more_{proposal_id}", use_container_width=True):
+        if len(rows) < total_rows:
+            if st.button("Φόρτωση περισσότερων", key=f"load_more_{proposal_id}", use_container_width=True):
                 st.session_state[page_key] += 1
                 st.rerun()
 
     with right:
-        st.markdown("#### Action Panel")
+        st.markdown("#### Πρακτική εικόνα πρότασης")
         metrics = pipeline.proposal_action_metrics(proposal_id)
         m1, m2 = st.columns(2)
-        m1.metric("Top-level comments", int(metrics["participation_volume"]))
-        m2.metric("Total reactions", int(metrics["total_reacts"]))
+        m1.metric("Αρχικά σχόλια", int(metrics["participation_volume"]))
+        m2.metric("Σύνολο αντιδράσεων", int(metrics["total_reacts"]))
         m3, m4 = st.columns(2)
-        m3.metric("Support-opposition index", f"{float(metrics['support_opposition_index']):.2f}")
-        m4.metric("Raw reaction score", f"{float(metrics['support_opposition_raw']):.1f}")
+        m3.metric("Δείκτης στήριξης/αντίθεσης", f"{float(metrics['support_opposition_index']):.2f}")
+        m4.metric("Ακατέργαστος δείκτης", f"{float(metrics['support_opposition_raw']):.1f}")
         m5, m6 = st.columns(2)
-        m5.metric("Civility risk rate", f"{float(metrics['civility_risk_rate']) * 100:.1f}%")
-        m6.metric("Review queue pressure", f"{float(metrics['review_queue_pressure']) * 100:.1f}%")
+        m5.metric("Κίνδυνος τοξικότητας", f"{float(metrics['civility_risk_rate']) * 100:.1f}%")
+        m6.metric("Πίεση ελέγχου", f"{float(metrics['review_queue_pressure']) * 100:.1f}%")
 
-        st.markdown("**Top concern clusters**")
-        top_clusters = metrics.get("top_concern_clusters", [])
-        if top_clusters:
-            for item in top_clusters:
+        st.markdown("**Κυρίαρχες ανησυχίες**")
+        clusters = metrics.get("top_concern_clusters", [])
+        if clusters:
+            for item in clusters:
                 st.markdown(f"- `{item['topic']}` ({item['count']})")
         else:
-            st.caption("No clusters yet.")
+            st.caption("Δεν υπάρχουν ακόμα σαφείς συστάδες.")
 
-        st.markdown("**Moderation log (latest)**")
-        events = list(reversed(pipeline.moderation_log(proposal_id)))[:12]
-        if events:
-            for event in events:
-                st.caption(
-                    f"{event['created_at']} · {event['action']} · {event['previous_status']} -> {event['new_status']} · {event['actor']}"
-                )
-        else:
-            st.caption("No moderation actions yet.")
+
+def _plot_with_info(title: str, tip: str, fig) -> None:
+    _info_title(title, tip)
+    st.plotly_chart(fig, width="stretch")
 
 
 def render_analysis_tabs(proposal_id: str) -> None:
     overview, proposal_series = pipeline.build_dashboard_data(mode="basic", proposal_id=proposal_id)
     overview_adv, proposal_adv = pipeline.build_dashboard_data(mode="advanced", proposal_id=proposal_id)
 
-    tab_discussion, tab_analysis, tab_advanced, tab_dev = st.tabs(["Discussion", "Analysis", "Advanced", "Dev"])
+    tab_discussion, tab_analysis, tab_advanced, tab_dev = st.tabs(["Συζήτηση", "Ανάλυση", "Προχωρημένα", "Τεχνικά (Dev)"])
 
     with tab_discussion:
         render_discussion_workspace(proposal_id)
 
     with tab_analysis:
-        st.markdown("#### Practical analysis")
+        st.markdown("#### Βασικά διαγράμματα απόφασης")
         a1, a2 = st.columns(2)
         with a1:
-            st.plotly_chart(proposal_sentiment_stance_fig(proposal_series), width="stretch")
+            _plot_with_info(
+                "Συναίσθημα και στάση",
+                "Δείχνει αν οι τοποθετήσεις είναι υπέρ/κατά και με ποιο συναισθηματικό πρόσημο.",
+                proposal_sentiment_stance_fig(proposal_series),
+            )
         with a2:
-            st.plotly_chart(proposal_topic_fig(proposal_series), width="stretch")
+            _plot_with_info(
+                "Κυρίαρχα θέματα",
+                "Τα πιο συχνά θέματα της συζήτησης για την τρέχουσα ανάρτηση.",
+                proposal_topic_fig(proposal_series),
+            )
         a3, a4 = st.columns(2)
         with a3:
-            st.plotly_chart(proposal_quality_fig(proposal_series, advanced=False), width="stretch")
+            _plot_with_info(
+                "Ποιότητα επιχειρημάτων",
+                "Κατανομή ποιότητας σχολίων με βάση τεκμηρίωση/δομή/σαφήνεια.",
+                proposal_quality_fig(proposal_series, advanced=False),
+            )
         with a4:
-            st.plotly_chart(proposal_review_state_mix_fig(proposal_series), width="stretch")
+            _plot_with_info(
+                "Κατάσταση ελέγχου",
+                "Ποιο ποσοστό σχολίων έμεινε ως έχει, διορθώθηκε ή χρειάζεται περαιτέρω έλεγχο.",
+                proposal_review_state_mix_fig(proposal_series),
+            )
 
     with tab_advanced:
-        st.markdown("#### Extended charts")
+        st.markdown("#### Εκτεταμένα διαγράμματα")
         b1, b2 = st.columns(2)
         with b1:
-            st.plotly_chart(overview_comparison_fig(overview_adv), width="stretch")
+            _plot_with_info("Σύγκριση προτάσεων", "Σύγκριση συμμετοχής/αντιδράσεων/στήριξης ανά πρόταση.", overview_comparison_fig(overview_adv))
         with b2:
-            st.plotly_chart(overview_sentiment_fig(overview_adv), width="stretch")
+            _plot_with_info("Συναίσθημα ανά πρόταση", "Κατανομή θετικών/ουδέτερων/αρνητικών σχολίων ανά πρόταση.", overview_sentiment_fig(overview_adv))
         b3, b4 = st.columns(2)
         with b3:
-            st.plotly_chart(overview_trend_fig(overview_adv), width="stretch")
+            _plot_with_info("Εξέλιξη στον χρόνο", "Πώς αλλάζει ο όγκος σχολίων ανά ημέρα.", overview_trend_fig(overview_adv))
         with b4:
-            st.plotly_chart(overview_service_fig(overview_adv), width="stretch")
+            _plot_with_info("Επίδραση υπηρεσιών", "Ποιες υπηρεσίες επηρεάζονται περισσότερο από τη συζήτηση.", overview_service_fig(overview_adv))
         b5, b6 = st.columns(2)
         with b5:
-            st.plotly_chart(proposal_reaction_velocity_fig(proposal_adv), width="stretch")
+            _plot_with_info("Ρυθμός αντιδράσεων", "Δείχνει ένταση και χρονισμό αντιδράσεων ανά σχόλιο.", proposal_reaction_velocity_fig(proposal_adv))
         with b6:
-            st.plotly_chart(proposal_correction_rates_fig(proposal_adv), width="stretch")
+            _plot_with_info("Διορθώσεις ανά δείκτη", "Σε ποια πεδία η διαδικασία ελέγχου κάνει περισσότερες διορθώσεις.", proposal_correction_rates_fig(proposal_adv))
         b7, b8 = st.columns(2)
         with b7:
-            st.plotly_chart(proposal_review_lag_fig(proposal_adv), width="stretch")
+            _plot_with_info("Καθυστέρηση ελέγχου", "Χρόνος μέχρι την τελική κατάσταση ανά σχόλιο.", proposal_review_lag_fig(proposal_adv))
         with b8:
-            st.plotly_chart(overview_quality_fig(overview_adv), width="stretch")
+            _plot_with_info("Ποιότητα review", "Συγκεντρωτικοί δείκτες ποιότητας του review ανά πρόταση.", overview_quality_fig(overview_adv))
 
     with tab_dev:
-        st.markdown("#### Architecture telemetry (dev only)")
+        st.markdown("#### Τεχνική τηλεμετρία αρχιτεκτονικής")
         arch = pipeline.architecture_metrics()
         d1, d2 = st.columns(2)
         with d1:
-            st.plotly_chart(arch_agent_outputs_fig(arch["agent_outputs"]), width="stretch")
+            _plot_with_info("Έξοδοι πρακτόρων", "Ποια labels παράγουν οι πράκτορες stage-1.", arch_agent_outputs_fig(arch["agent_outputs"]))
         with d2:
-            st.plotly_chart(arch_agent_confidence_fig(arch["agent_confidence"]), width="stretch")
+            _plot_with_info("Βεβαιότητα πρακτόρων", "Κατανομή confidence ανά πράκτορα.", arch_agent_confidence_fig(arch["agent_confidence"]))
         d3, d4 = st.columns(2)
         with d3:
-            st.plotly_chart(arch_classifier_vs_llm_fig(arch["classifier_vs_llm"]), width="stretch")
+            _plot_with_info("Classifier vs LLM", "Ισορροπία φόρτου και confidence ανά οικογένεια.", arch_classifier_vs_llm_fig(arch["classifier_vs_llm"]))
         with d4:
-            st.plotly_chart(arch_api_validation_fig(arch["api_validation"]), width="stretch")
+            _plot_with_info("Έλεγχος API", "Περασμένα/αποτυχημένα validation events.", arch_api_validation_fig(arch["api_validation"]))
         d5, d6 = st.columns(2)
         with d5:
-            st.plotly_chart(arch_queue_timeline_fig(arch["queue_timeline"]), width="stretch")
+            _plot_with_info("Ουρά επεξεργασίας", "Βάθος ουράς και throughput ανά βήμα.", arch_queue_timeline_fig(arch["queue_timeline"]))
         with d6:
-            st.plotly_chart(arch_bypass_vs_nlp_fig(arch["bypass_vs_nlp"]), width="stretch")
+            _plot_with_info("Bypass vs NLP", "Σύγκριση διαδρομών event processing.", arch_bypass_vs_nlp_fig(arch["bypass_vs_nlp"]))
         d7, d8 = st.columns(2)
         with d7:
-            st.plotly_chart(arch_store_volume_fig(arch["store_volume"]), width="stretch")
+            _plot_with_info("Όγκος αποθήκευσης", "Πλήθος εγγραφών stage-1/stage-2 στον χρόνο.", arch_store_volume_fig(arch["store_volume"]))
         with d8:
-            st.plotly_chart(arch_store_freshness_fig(arch["store_freshness"]), width="stretch")
+            _plot_with_info("Φρεσκάδα δεδομένων", "Καθυστέρηση από παραγωγή insight έως dashboard.", arch_store_freshness_fig(arch["store_freshness"]))
         d9, d10 = st.columns(2)
         with d9:
-            st.plotly_chart(arch_scheduler_trigger_fig(arch["scheduler_triggers"]), width="stretch")
+            _plot_with_info("Scheduler triggers", "Πότε θα ενεργοποιούνταν κανόνες εκτέλεσης.", arch_scheduler_trigger_fig(arch["scheduler_triggers"]))
         with d10:
-            st.plotly_chart(arch_calibration_fig(arch["calibration_metrics"]), width="stretch")
+            _plot_with_info("Calibration", "ECE/Brier proxies ανά head.", arch_calibration_fig(arch["calibration_metrics"]))
         d11, d12 = st.columns(2)
         with d11:
-            st.plotly_chart(arch_abstain_summary_fig(arch["abstain_summary"]), width="stretch")
+            _plot_with_info("Abstain λόγοι", "Γιατί στέλνουμε δείγματα σε ανθρώπινο review.", arch_abstain_summary_fig(arch["abstain_summary"]))
         with d12:
-            st.plotly_chart(arch_conflict_summary_fig(arch["conflict_summary"]), width="stretch")
-        st.plotly_chart(arch_emotion_distribution_fig(arch["emotion_distribution"]), width="stretch")
+            _plot_with_info("Συγκρούσεις σημάτων", "Περιπτώσεις αντίφασης μεταξύ heads.", arch_conflict_summary_fig(arch["conflict_summary"]))
+        _plot_with_info("Κατανομή συναισθημάτων", "Ποιο συναίσθημα κυριαρχεί στο σύνολο σχολίων.", arch_emotion_distribution_fig(arch["emotion_distribution"]))
 
 
-st.title(f"{MUNICIPALITY_NAME} - Civic Lens")
-st.caption("Discussion-first moderation and analysis console (mock++ deterministic mode).")
-top_left, top_right = st.columns([6, 1])
+st.title(f"{MUNICIPALITY_NAME} - Πλατφόρμα Δημόσιας Διαβούλευσης")
+st.caption("Blueprint mockup: δημοτική ανάρτηση, νήμα σχολίων/απαντήσεων και πρακτική ανάλυση.")
+_, top_right = st.columns([6, 1])
 with top_right:
-    if st.button("Logout", use_container_width=True):
+    if st.button("Αποσύνδεση", use_container_width=True):
         st.session_state["authenticated"] = False
         st.rerun()
 
@@ -356,4 +382,4 @@ selected = st.session_state.get("selected_proposal_id")
 if selected:
     render_analysis_tabs(selected)
 else:
-    st.info("Open a proposal card to inspect discussion and analysis.")
+    st.info("Άνοιξε μία ανάρτηση για να δεις πλήρη συζήτηση, απαντήσεις και ανάλυση.")

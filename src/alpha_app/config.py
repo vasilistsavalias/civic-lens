@@ -1,7 +1,7 @@
 ﻿from __future__ import annotations
 
 MUNICIPALITY_ID = "thessaloniki"
-MUNICIPALITY_NAME = "Municipality of Thessaloniki"
+MUNICIPALITY_NAME = "Δήμος Θεσσαλονίκης"
 
 REACTION_KEYS = ["like", "dislike", "love", "angry", "sad", "wow"]
 LEGACY_REACTION_KEY_MAP = {
@@ -27,24 +27,24 @@ MOST_RELEVANT_WEIGHTS_V1 = {
 MAX_THREAD_DEPTH = 3
 FEED_PAGE_SIZE = 25
 REACTION_LABELS = {
-    "like": "Like",
-    "dislike": "Dislike",
-    "love": "Love",
-    "angry": "Angry",
-    "sad": "Sad",
-    "wow": "Wow",
+    "like": "Μου αρέσει",
+    "dislike": "Δεν μου αρέσει",
+    "love": "Τέλειο",
+    "angry": "Θυμός",
+    "sad": "Λύπη",
+    "wow": "Έκπληξη",
 }
 
 SERVICE_LABELS = {
-    "water": "Water",
-    "electricity": "Electricity",
-    "traffic": "Traffic",
-    "waste": "Waste",
-    "telecom": "Telecom",
+    "water": "Ύδρευση",
+    "electricity": "Ηλεκτρισμός",
+    "traffic": "Κυκλοφορία",
+    "waste": "Απορρίμματα",
+    "telecom": "Τηλεπικοινωνίες",
 }
 STATUS_LABELS = {
-    "planned": "Planned",
-    "active": "Active",
-    "delayed": "Delayed",
-    "completed": "Completed",
+    "planned": "Σχεδιασμένο",
+    "active": "Ενεργό",
+    "delayed": "Καθυστερημένο",
+    "completed": "Ολοκληρωμένο",
 }
