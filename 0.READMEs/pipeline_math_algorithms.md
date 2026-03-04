@@ -1,128 +1,110 @@
-# Pipeline Math and Agents (Supervisor Brief)
+﻿# Pipeline Math and Agents (Supervisor Brief)
 
-## Scope (Current Mock++ Phase)
-- Mode: deterministic `Mock++` (no production ML model serving yet).
-- Languages: Greek + English lexical support.
-- Purpose: transparent, testable blueprint before real model swap-in.
+## One-line Summary
+Current system is a deterministic, multi-head Mock++ blueprint; target system is a hybrid cascade (heuristics + model heads + constrained LLM judge + human review) with fairness and evidence-tier governance.
 
-## How Many Agents We Use
-- Stage-1 agents in code (`AGENT_NAMES`): **11**
-  1. `sentiment`
-  2. `stance`
-  3. `emotion`
-  4. `irony`
-  5. `argument_quality`
-  6. `profanity`
-  7. `toxicity`
-  8. `civility`
-  9. `structure`
-  10. `evidence`
-  11. `relevance`
-- Extra derived signal (computed and stored): `clarity` (used in quality formula and telemetry).
+## Agent Count and Roles
 
-## What Our Classifier Is
-- Current classifier family: **rule-based multi-head lexical classifier** (`src/alpha_app/core/mock_engine.py`).
-- Not a single monolithic classifier. We run one head per task and then combine signals.
-- Every head emits:
-  - score in `[0,1]` (`agent_scores`)
-  - label (`agent_labels`)
-  - plus shared confidence/routing metadata.
+### Current implemented Stage-1 agents (11)
+1. `sentiment`
+2. `stance`
+3. `emotion`
+4. `irony`
+5. `argument_quality`
+6. `profanity`
+7. `toxicity`
+8. `civility`
+9. `structure`
+10. `evidence`
+11. `relevance`
 
-## Are We Using Heuristics
-- **Yes**. Heuristics are the core of Mock++ right now.
-- Main heuristic types:
-  - accent-normalized token matching (Greek/English lexicons),
-  - phrase markers (irony, claims, reasons, politeness),
-  - structural features (length, counter-argument markers),
-  - style features (caps ratio, exclamation burst),
-  - proposal/topic keyword relevance.
+Derived signal: `clarity`.
 
-## Core Math and Algorithms
+### Final target runtime topology (14)
+1. Heuristic Gate Agent
+2. Sentiment Agent
+3. Stance Agent
+4. Emotion Agent
+5. Irony Agent
+6. Profanity Agent
+7. Toxicity Agent
+8. Civility Agent
+9. Structure Agent
+10. Evidence Agent
+11. Relevance Agent
+12. Calibration & Uncertainty Agent
+13. LLM Adjudication Agent (two-pass)
+14. Fairness Auditor Agent
 
-### 1) Sentiment / Stance
-- Polarity from positive vs negative token counts.
-- Stance from pro vs against token counts.
-- Labels:
-  - sentiment: `positive|neutral|negative`
-  - stance: `for|neutral|against`
+## Are We Using Heuristics in Final Product?
+Yes. Heuristics remain first-pass guardrails for:
+- normalization,
+- lexical priors,
+- cheap safety checks,
+- fallback behavior.
 
-### 2) Emotion (Multi-label)
-- Emotions: `anger,fear,sadness,joy,trust,disgust,neutral`.
-- Per-label score from keyword hit share.
-- Intensity:
-  - `emotion_intensity = clamp(total_emotion_hits / 4, 0, 1)`
+They are not the sole decision engine in hybrid mode.
 
-### 3) Safety Split
-- `profanity_score = clamp(profanity_hits / 2, 0, 1)`
-- `toxicity_score = clamp(0.45*profanity + 0.35*insults + 0.10*caps_ratio + 0.10*exclamation_burst, 0, 1)`
-- `civility_score = clamp(0.60*(1 - toxicity_score) + 0.40*politeness_signal, 0, 1)`
-- `offense_target`: `individual|group|untargeted|unknown` (placeholder logic active).
+## Classifier Strategy
+Not a single classifier.
+We use a multi-head architecture where each head solves one task and exposes score + label + metadata.
 
-### 4) Argument Traits
-- `evidence_score = 0.45*reason_markers + 0.35*source_markers + 0.20*numeric_signal`
-- `structure_score = mean(claim_signal, reason_signal, counter_signal, length_signal)`
-- `relevance_score` from proposal/topic keyword hits
-- `clarity_score = 0.5*clarity_markers + 0.5*length_signal`
+## Core Equations (Current Implementation)
+All bounded to `[0,1]`.
 
-### 5) Composite Quality Score
-- Implemented formula:
-- `quality_score = clamp(0.30*relevance + 0.25*evidence + 0.20*structure + 0.15*clarity + 0.10*civility - 0.15*toxicity, 0, 1)`
-- Stored as `argument_quality_score` for backward compatibility.
+- `toxicity = 0.45*profanity + 0.35*insults + 0.10*caps + 0.10*exclamation`
+- `civility = 0.60*(1 - toxicity) + 0.40*politeness`
+- `evidence = 0.45*reason + 0.35*source + 0.20*numeric`
+- `structure = mean(claim, reason, counterargument, length)`
+- `quality = 0.30*relevance + 0.25*evidence + 0.20*structure + 0.15*clarity + 0.10*civility - 0.15*toxicity`
 
-### 6) Calibration
-- Temperature scaling interface per head (`src/alpha_app/core/calibration.py`):
-- `p_cal = sigmoid(logit(p_raw) / T)`
-- Outputs saved in `calibrated_scores`.
+Routing thresholds:
+- low confidence: `max_prob < 0.55`
+- high entropy: `mean_entropy > 0.95`
+- offense gray zone: `0.45 <= toxicity <= 0.65`
 
-### 7) Abstain / Review Routing (Balanced Policy)
-- Triggers:
-  - low confidence: `max_prob < 0.55`
-  - high entropy: `mean_entropy > 0.95`
-  - irony/sentiment/stance conflicts
-  - offense gray zone: `0.45 <= toxicity <= 0.65`
-- Emits:
-  - `abstain_flags`
-  - `conflict_flags`
-  - `review_reason_codes`
-- Guardrail: profanity-only signal does not auto-suppress by itself.
+## What Is Research-Derived vs Heuristic?
+- Task decomposition and metric families: mostly Tier A.
+- Numeric coefficients and routing thresholds above: currently Tier C defaults.
+- Tier metadata is explicit in `src/alpha_app/core/evidence_registry.py`.
 
-### 8) Reaction Scoring (Discussion Feed Logic)
-- `total_reacts = sum(reactions)`
-- `signed_score_raw = Σ(weight[r] * count[r])`
-- `signed_score_norm = tanh(signed_score_raw / max(1,total_reacts))`
-- Dual use:
-  - raw magnitude for queue/action context,
-  - normalized score for ranking/display.
+## LLM Judge Design (Hybrid)
+No single free-form prompt.
 
-## Metrics We Track
+Two-pass constrained protocol:
+1. Pass A: strict JSON rubric scores + rationale tags.
+2. Pass B: consistency + policy checks.
 
-### Evaluation Harness (`tools/eval/run_eval.py`)
-- Macro-F1: sentiment, stance, toxicity.
-- Per-class recall: sentiment, stance, toxicity.
-- Multi-label emotion F1 (micro).
-- Quality correlation: Pearson, Spearman.
-- Calibration proxies: ECE proxy, Brier proxy.
-- Operational: abstain rate, slice false-positive rate (`non_offensive_criticism`).
+Trigger conditions:
+- conflicts,
+- uncertainty,
+- moderation borderlines.
 
-### Runtime / Architecture Telemetry (`pipeline.architecture_metrics`)
-- `calibration_metrics`
-- `abstain_summary`
-- `conflict_summary`
-- `emotion_distribution`
-- plus queue/store/scheduler/validation blocks.
+## Metrics We Report
 
-## What Changes Later (Real Model Phase)
-- Keep same contract (`Stage1Result` keys stay stable).
-- Swap rule-based heads with trained models per head.
-- Refit thresholds/calibration using labeled data.
-- Keep guardrails and evaluation suite unchanged as governance backbone.
+### Task quality
+- Macro-F1 + per-class recall (sentiment/stance/toxicity)
+- Emotion multi-label F1
+- Quality Pearson/Spearman
+- Calibration proxies (ECE/Brier)
 
-## Source Pointers
-- Research citations and source-by-source mapping:
-  - `0.READMEs/research_ground_truth.md`
-- Rubric for stage-1 agents:
-  - `docs/research/agent_rubric.md`
-- Implementation:
-  - `src/alpha_app/core/mock_engine.py`
-  - `src/alpha_app/core/calibration.py`
-  - `src/alpha_app/core/pipeline.py`
+### Governance quality
+- Abstain rate
+- Slice false-positive rate
+- Fairness slice metrics (FPR/FNR/TPR/AUC proxy + language gaps)
+- Judge reliability proxies
+- Evidence coverage by tier
+
+## Versioning / Policy Controls
+- `INFERENCE_MODE = mock | hybrid`
+- `JUDGE_TRIGGER_POLICY_VERSION`
+- `FAIRNESS_POLICY_VERSION`
+- `EVIDENCE_REGISTRY_VERSION`
+
+## Canonical Files
+- `src/alpha_app/core/evidence_registry.py`
+- `src/alpha_app/core/mock_engine.py`
+- `src/alpha_app/core/pipeline.py`
+- `src/alpha_app/core/judge.py`
+- `tools/eval/run_eval.py`
+- `0.READMEs/research_ground_truth.md`

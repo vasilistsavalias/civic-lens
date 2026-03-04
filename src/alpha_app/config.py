@@ -3,6 +3,11 @@
 MUNICIPALITY_ID = "thessaloniki"
 MUNICIPALITY_NAME = "Δήμος Θεσσαλονίκης"
 
+INFERENCE_MODE = "mock"
+JUDGE_TRIGGER_POLICY_VERSION = "v1"
+FAIRNESS_POLICY_VERSION = "v1"
+EVIDENCE_REGISTRY_VERSION = "v1"
+
 REACTION_KEYS = ["like", "dislike", "love", "angry", "sad", "wow"]
 LEGACY_REACTION_KEY_MAP = {
     "likes": "like",
@@ -26,6 +31,15 @@ MOST_RELEVANT_WEIGHTS_V1 = {
 }
 MAX_THREAD_DEPTH = 3
 FEED_PAGE_SIZE = 25
+
+# Routing thresholds are centralized to keep evidence-tier metadata traceable.
+LOW_CONFIDENCE_THRESHOLD = 0.55
+HIGH_ENTROPY_THRESHOLD = 0.95
+OFFENSE_GRAY_ZONE_LOW = 0.45
+OFFENSE_GRAY_ZONE_HIGH = 0.65
+TOXICITY_AUTOBLOCK_THRESHOLD = 0.75
+TOXICITY_TARGETED_BLOCK_THRESHOLD = 0.55
+
 REACTION_LABELS = {
     "like": "Μου αρέσει",
     "dislike": "Δεν μου αρέσει",

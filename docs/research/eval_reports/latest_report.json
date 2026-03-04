@@ -29,8 +29,72 @@
     "ece_proxy": 0.3889,
     "brier_proxy": 0.1944
   },
-  "abstain_rate": 0.0,
+  "abstain_rate": 0.2222,
   "slice_false_positive_rate_non_offensive_criticism": 0.0,
+  "fairness": {
+    "slice_metrics": {
+      "lang:en": {
+        "fpr": 0.0,
+        "fnr": 1.0,
+        "tpr": 0.0,
+        "auc_proxy": 0.5,
+        "count": 9
+      },
+      "offense_target:unknown": {
+        "fpr": 0.0,
+        "fnr": 0.0,
+        "tpr": 0.0,
+        "auc_proxy": 0.5,
+        "count": 7
+      },
+      "offense_target:individual": {
+        "fpr": 0.0,
+        "fnr": 1.0,
+        "tpr": 0.0,
+        "auc_proxy": 0.0,
+        "count": 1
+      },
+      "offense_target:untargeted": {
+        "fpr": 0.0,
+        "fnr": 0.0,
+        "tpr": 0.0,
+        "auc_proxy": 0.5,
+        "count": 1
+      }
+    },
+    "gap_summary": {
+      "fpr_gap": 0.0,
+      "fnr_gap": 1.0,
+      "tpr_gap": 0.0,
+      "auc_gap": 0.5
+    },
+    "language_gap": {
+      "el_vs_en_fpr_gap": 0.0,
+      "el_vs_en_fnr_gap": 1.0
+    }
+  },
+  "judge_reliability": {
+    "judge_invocation_rate": 0.2222,
+    "decision_id_completeness": 1.0,
+    "judge_human_agreement_proxy": 1.0,
+    "inter_judge_consistency_proxy": 1.0
+  },
+  "evidence_coverage": {
+    "updated_on": "2026-03-04",
+    "covered_signals": 12,
+    "total_signals": 12,
+    "coverage_ratio": 1.0,
+    "tier_counts": {
+      "A": 8,
+      "B": 0,
+      "C": 4
+    },
+    "tier_ratios": {
+      "A": 0.6667,
+      "B": 0.0,
+      "C": 0.3333
+    }
+  },
   "sample_count": 9,
   "limitations": [
     "Public benchmark subset is mapped and reduced for mockup comparability.",

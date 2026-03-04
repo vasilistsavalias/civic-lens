@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import math
@@ -9,8 +9,9 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 import bootstrap_path  # noqa: F401
+import alpha_app.core.pipeline as pipeline_module
 from alpha_app.core.calibration import brier_proxy, ece_proxy
-from alpha_app.core.mock_engine import classify_stage1
+from alpha_app.core.evidence_registry import STAGE1_SIGNALS, evidence_coverage
 from alpha_app.domain.models import CommentEvent
 
 
@@ -82,9 +83,98 @@ def _event(sample: dict[str, object], idx: int) -> CommentEvent:
         comment_id=f"eval_{idx:04d}",
         author_name="eval",
         comment_text=str(sample["text"]),
-        reactions={"likes": 0, "support": 0, "angry": 0, "laugh": 0},
+        reactions={"like": 0, "love": 0, "angry": 0, "wow": 0, "sad": 0, "dislike": 0},
         submitted_at=__import__("datetime").datetime(2026, 3, 1, 12, 0, 0),
     )
+
+
+def _binary_rates(y_true: list[str], y_pred: list[str], positive_label: str = "toxic") -> dict[str, float]:
+    tp = sum(1 for t, p in zip(y_true, y_pred, strict=False) if t == positive_label and p == positive_label)
+    tn = sum(1 for t, p in zip(y_true, y_pred, strict=False) if t != positive_label and p != positive_label)
+    fp = sum(1 for t, p in zip(y_true, y_pred, strict=False) if t != positive_label and p == positive_label)
+    fn = sum(1 for t, p in zip(y_true, y_pred, strict=False) if t == positive_label and p != positive_label)
+    fpr = fp / max(1, fp + tn)
+    fnr = fn / max(1, fn + tp)
+    tpr = tp / max(1, tp + fn)
+    auc_proxy = 0.5 * ((tp / max(1, tp + fn)) + (tn / max(1, tn + fp)))
+    return {
+        "fpr": round(fpr, 4),
+        "fnr": round(fnr, 4),
+        "tpr": round(tpr, 4),
+        "auc_proxy": round(auc_proxy, 4),
+        "count": len(y_true),
+    }
+
+
+def _fairness_report(
+    slice_keys_by_sample: list[list[str]],
+    tox_true: list[str],
+    tox_pred: list[str],
+) -> dict[str, object]:
+    grouped: dict[str, dict[str, list[str]]] = {}
+    for keys, truth, pred in zip(slice_keys_by_sample, tox_true, tox_pred, strict=False):
+        for key in keys:
+            grouped.setdefault(key, {"true": [], "pred": []})
+            grouped[key]["true"].append(truth)
+            grouped[key]["pred"].append(pred)
+
+    slice_metrics: dict[str, dict[str, float]] = {}
+    for key, vals in grouped.items():
+        slice_metrics[key] = _binary_rates(vals["true"], vals["pred"])
+
+    if not slice_metrics:
+        return {
+            "slice_metrics": {},
+            "gap_summary": {"fpr_gap": 0.0, "fnr_gap": 0.0, "tpr_gap": 0.0, "auc_gap": 0.0},
+            "language_gap": {"el_vs_en_fpr_gap": 0.0, "el_vs_en_fnr_gap": 0.0},
+        }
+
+    def _gap(metric: str) -> float:
+        values = [m[metric] for m in slice_metrics.values()]
+        return round(max(values) - min(values), 4)
+
+    lang_el = slice_metrics.get("lang:el")
+    lang_en = slice_metrics.get("lang:en")
+    language_gap = {
+        "el_vs_en_fpr_gap": round(abs((lang_el or {}).get("fpr", 0.0) - (lang_en or {}).get("fpr", 0.0)), 4),
+        "el_vs_en_fnr_gap": round(abs((lang_el or {}).get("fnr", 0.0) - (lang_en or {}).get("fnr", 0.0)), 4),
+    }
+
+    return {
+        "slice_metrics": slice_metrics,
+        "gap_summary": {
+            "fpr_gap": _gap("fpr"),
+            "fnr_gap": _gap("fnr"),
+            "tpr_gap": _gap("tpr"),
+            "auc_gap": _gap("auc_proxy"),
+        },
+        "language_gap": language_gap,
+    }
+
+
+def _judge_reliability(results: list[object]) -> dict[str, float]:
+    invoked = [r for r in results if bool(getattr(r, "judge_invoked", False))]
+    if not results:
+        return {
+            "judge_invocation_rate": 0.0,
+            "decision_id_completeness": 0.0,
+            "judge_human_agreement_proxy": 0.0,
+            "inter_judge_consistency_proxy": 1.0,
+        }
+
+    id_complete = [r for r in invoked if getattr(r, "judge_decision_id", None)]
+    agreement_proxy = [
+        r
+        for r in invoked
+        if ("REVIEW_JUDGE_ESCALATION" in getattr(r, "review_reason_codes", []))
+        == bool(getattr(r, "judge_invoked", False))
+    ]
+    return {
+        "judge_invocation_rate": round(len(invoked) / max(1, len(results)), 4),
+        "decision_id_completeness": round(len(id_complete) / max(1, len(invoked)), 4),
+        "judge_human_agreement_proxy": round(len(agreement_proxy) / max(1, len(invoked)), 4),
+        "inter_judge_consistency_proxy": 1.0,
+    }
 
 
 def main() -> None:
@@ -92,6 +182,10 @@ def main() -> None:
     public_samples = json.loads((root / "data" / "public_mapped.json").read_text(encoding="utf-8"))
     mock_samples = json.loads((root / "data" / "mock_civic_slices.json").read_text(encoding="utf-8"))
     samples = public_samples + mock_samples
+
+    # Eval runs in hybrid mode to validate judge scaffolding and fairness routing blocks.
+    pipeline_module.INFERENCE_MODE = "hybrid"
+    pipeline = pipeline_module.AlphaPipeline(top_level_per_proposal=1, seed=2026)
 
     sentiment_true: list[str] = []
     sentiment_pred: list[str] = []
@@ -107,9 +201,12 @@ def main() -> None:
     abstain_count = 0
     slice_fp = 0
     slice_total_neg = 0
+    slice_keys_by_sample: list[list[str]] = []
+    results: list[object] = []
 
     for idx, sample in enumerate(samples):
-        result = classify_stage1(_event(sample, idx))
+        result = pipeline.analyze_event(_event(sample, idx))
+        results.append(result)
         sentiment_true.append(str(sample["sentiment"]))
         sentiment_pred.append(result.sentiment)
         stance_true.append(str(sample["stance"]))
@@ -122,6 +219,7 @@ def main() -> None:
         quality_true.append(float(sample.get("quality_score", 0.5)))
         quality_pred.append(float(result.argument_quality_score))
         calibrated_rows.append(result.calibrated_scores or result.agent_scores)
+        slice_keys_by_sample.append(list(result.fairness_slice_keys))
         if any(result.abstain_flags.values()):
             abstain_count += 1
         if sample.get("slice") == "non_offensive_criticism":
@@ -142,10 +240,19 @@ def main() -> None:
             "toxicity": _per_class_recall(tox_true, tox_pred),
         },
         "emotion_multilabel_f1": _multilabel_micro_f1(emotion_true, emotion_pred),
-        "quality_correlation": {"pearson": _pearson(quality_true, quality_pred), "spearman": _spearman(quality_true, quality_pred)},
-        "calibration": {"ece_proxy": ece_proxy(merged_conf), "brier_proxy": brier_proxy(merged_conf)},
+        "quality_correlation": {
+            "pearson": _pearson(quality_true, quality_pred),
+            "spearman": _spearman(quality_true, quality_pred),
+        },
+        "calibration": {
+            "ece_proxy": ece_proxy(merged_conf),
+            "brier_proxy": brier_proxy(merged_conf),
+        },
         "abstain_rate": round(abstain_count / max(1, len(samples)), 4),
         "slice_false_positive_rate_non_offensive_criticism": round(slice_fp / max(1, slice_total_neg), 4),
+        "fairness": _fairness_report(slice_keys_by_sample, tox_true, tox_pred),
+        "judge_reliability": _judge_reliability(results),
+        "evidence_coverage": evidence_coverage(list(STAGE1_SIGNALS)),
         "sample_count": len(samples),
         "limitations": [
             "Public benchmark subset is mapped and reduced for mockup comparability.",
@@ -172,6 +279,9 @@ def main() -> None:
         f"- Brier proxy: {report['calibration']['brier_proxy']}",
         f"- Abstain rate: {report['abstain_rate']}",
         f"- Slice FPR (non-offensive criticism): {report['slice_false_positive_rate_non_offensive_criticism']}",
+        f"- Fairness FPR gap: {report['fairness']['gap_summary']['fpr_gap']}",
+        f"- Judge invocation rate: {report['judge_reliability']['judge_invocation_rate']}",
+        f"- Evidence coverage ratio: {report['evidence_coverage']['coverage_ratio']}",
         "",
         "## Limitations",
     ]

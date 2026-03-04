@@ -72,6 +72,12 @@ def _initial_row(comment: CommentEvent, result: Stage1Result) -> dict[str, objec
         "conflict_flags": list(result.conflict_flags),
         "review_reason_codes": list(result.review_reason_codes),
         "offense_target": result.offense_target,
+        "evidence_tier_by_signal": dict(result.evidence_tier_by_signal),
+        "signal_rationale_refs": {k: list(v) for k, v in result.signal_rationale_refs.items()},
+        "model_or_rule_version": dict(result.model_or_rule_version),
+        "judge_invoked": bool(result.judge_invoked),
+        "judge_decision_id": result.judge_decision_id,
+        "fairness_slice_keys": list(result.fairness_slice_keys),
     }
 
 

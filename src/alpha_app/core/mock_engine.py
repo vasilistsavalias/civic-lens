@@ -4,7 +4,13 @@ import re
 import unicodedata
 from datetime import datetime
 
-from alpha_app.config import MAX_THREAD_DEPTH
+from alpha_app.config import INFERENCE_MODE, MAX_THREAD_DEPTH
+from alpha_app.core.evidence_registry import (
+    NUMERIC_CONSTANT_EVIDENCE,
+    default_evidence_tier_by_signal,
+    default_signal_rationale_refs,
+    model_or_rule_versions,
+)
 from alpha_app.domain.models import CommentEvent, Stage1Result
 
 # Research-backed mock agent catalog used in Stage-1.
@@ -197,6 +203,18 @@ PROPOSAL_KEYWORDS = {
 
 TOKEN_SPLIT_RE = re.compile(r"[^\w]+", flags=re.UNICODE)
 
+TOXICITY_WEIGHT_PROFANITY = float(NUMERIC_CONSTANT_EVIDENCE["toxicity_weight_profanity"].value)
+TOXICITY_WEIGHT_INSULTS = float(NUMERIC_CONSTANT_EVIDENCE["toxicity_weight_insults"].value)
+TOXICITY_WEIGHT_CAPS = float(NUMERIC_CONSTANT_EVIDENCE["toxicity_weight_caps"].value)
+TOXICITY_WEIGHT_EXCLAMATION = float(NUMERIC_CONSTANT_EVIDENCE["toxicity_weight_exclamation"].value)
+
+QUALITY_WEIGHT_RELEVANCE = float(NUMERIC_CONSTANT_EVIDENCE["quality_weight_relevance"].value)
+QUALITY_WEIGHT_EVIDENCE = float(NUMERIC_CONSTANT_EVIDENCE["quality_weight_evidence"].value)
+QUALITY_WEIGHT_STRUCTURE = float(NUMERIC_CONSTANT_EVIDENCE["quality_weight_structure"].value)
+QUALITY_WEIGHT_CLARITY = float(NUMERIC_CONSTANT_EVIDENCE["quality_weight_clarity"].value)
+QUALITY_WEIGHT_CIVILITY = float(NUMERIC_CONSTANT_EVIDENCE["quality_weight_civility"].value)
+QUALITY_WEIGHT_TOXICITY_PENALTY = float(NUMERIC_CONSTANT_EVIDENCE["quality_weight_toxicity_penalty"].value)
+
 
 def _strip_accents(text: str) -> str:
     decomposed = unicodedata.normalize("NFD", text)
@@ -226,6 +244,21 @@ def _caps_ratio(raw_text: str) -> float:
         return 0.0
     uppercase = [ch for ch in letters if ch.isupper()]
     return len(uppercase) / len(letters)
+
+
+def _language_slice_key(text: str) -> str:
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters:
+        return "lang:unknown"
+    greek_letters = sum(1 for ch in letters if "\u0370" <= ch <= "\u03FF" or "\u1F00" <= ch <= "\u1FFF")
+    latin_letters = sum(1 for ch in letters if ("A" <= ch <= "Z") or ("a" <= ch <= "z"))
+    if greek_letters and latin_letters:
+        return "lang:mixed"
+    if greek_letters:
+        return "lang:el"
+    if latin_letters:
+        return "lang:en"
+    return "lang:other"
 
 
 def validate_event(event: CommentEvent, known_proposal_ids: set[str]) -> None:
@@ -294,7 +327,12 @@ def classify_stage1(event: CommentEvent) -> Stage1Result:
     insult_hits = len(words & INSULT_WORDS)
     caps = _caps_ratio(raw_text)
     exclamatory = 1.0 if raw_text.count("!") >= 2 else 0.0
-    toxicity_score = _bounded(0.45 * profanity_score + 0.35 * _bounded(insult_hits / 2.0) + 0.1 * caps + 0.1 * exclamatory)
+    toxicity_score = _bounded(
+        TOXICITY_WEIGHT_PROFANITY * profanity_score
+        + TOXICITY_WEIGHT_INSULTS * _bounded(insult_hits / 2.0)
+        + TOXICITY_WEIGHT_CAPS * caps
+        + TOXICITY_WEIGHT_EXCLAMATION * exclamatory
+    )
     toxicity_label = "toxic" if toxicity_score >= 0.45 else "non_toxic"
 
     politeness_hits = len(words & POLITENESS_WORDS)
@@ -345,12 +383,12 @@ def classify_stage1(event: CommentEvent) -> Stage1Result:
 
     argument_quality_score = round(
         _bounded(
-            0.30 * relevance_score
-            + 0.25 * evidence_score
-            + 0.2 * structure_score
-            + 0.15 * clarity_score
-            + 0.10 * civility_score
-            - 0.15 * toxicity_score
+            QUALITY_WEIGHT_RELEVANCE * relevance_score
+            + QUALITY_WEIGHT_EVIDENCE * evidence_score
+            + QUALITY_WEIGHT_STRUCTURE * structure_score
+            + QUALITY_WEIGHT_CLARITY * clarity_score
+            + QUALITY_WEIGHT_CIVILITY * civility_score
+            - QUALITY_WEIGHT_TOXICITY_PENALTY * toxicity_score
         ),
         2,
     )
@@ -377,6 +415,7 @@ def classify_stage1(event: CommentEvent) -> Stage1Result:
     for topic, keys in TOPIC_KEYWORDS.items():
         if words & keys:
             tags.append(topic)
+    fairness_slice_keys = sorted({_language_slice_key(raw_text), f"offense_target:{offense_target}"})
 
     agent_scores = {
         "sentiment": round(sentiment_scalar, 2),
@@ -421,4 +460,8 @@ def classify_stage1(event: CommentEvent) -> Stage1Result:
         emotion_scores=emotion_scores,
         emotion_intensity=emotion_intensity,
         offense_target=offense_target,  # type: ignore[arg-type]
+        evidence_tier_by_signal=default_evidence_tier_by_signal(),
+        signal_rationale_refs=default_signal_rationale_refs(),
+        model_or_rule_version=model_or_rule_versions(INFERENCE_MODE),
+        fairness_slice_keys=fairness_slice_keys,
     )

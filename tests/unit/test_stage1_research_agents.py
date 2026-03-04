@@ -81,3 +81,8 @@ def test_stage1_contract_v2_fields_have_valid_ranges() -> None:
     assert isinstance(result.abstain_flags, dict)
     assert isinstance(result.conflict_flags, list)
     assert isinstance(result.review_reason_codes, list)
+    assert isinstance(result.evidence_tier_by_signal, dict)
+    assert isinstance(result.signal_rationale_refs, dict)
+    assert isinstance(result.model_or_rule_version, dict)
+    assert isinstance(result.judge_invoked, bool)
+    assert isinstance(result.fairness_slice_keys, list)

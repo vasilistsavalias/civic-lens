@@ -10,15 +10,26 @@ from pathlib import Path
 
 from alpha_app.config import (
     FEED_PAGE_SIZE,
+    FAIRNESS_POLICY_VERSION,
+    HIGH_ENTROPY_THRESHOLD,
+    INFERENCE_MODE,
+    JUDGE_TRIGGER_POLICY_VERSION,
     LEGACY_REACTION_KEY_MAP,
+    LOW_CONFIDENCE_THRESHOLD,
     MOST_RELEVANT_WEIGHTS_V1,
     MUNICIPALITY_ID,
     MAX_THREAD_DEPTH,
+    OFFENSE_GRAY_ZONE_HIGH,
+    OFFENSE_GRAY_ZONE_LOW,
     REACTION_KEYS,
     REACTION_WEIGHTS_V1,
+    TOXICITY_AUTOBLOCK_THRESHOLD,
+    TOXICITY_TARGETED_BLOCK_THRESHOLD,
 )
 from alpha_app.core.artifacts import PipelineArtifacts
 from alpha_app.core.calibration import brier_proxy, calibrate_scores, ece_proxy, mean_entropy
+from alpha_app.core.evidence_registry import STAGE1_SIGNALS, evidence_coverage, model_or_rule_versions
+from alpha_app.core.judge import run_two_pass_judge
 from alpha_app.core.mock_engine import classify_stage1, validate_event
 from alpha_app.core.proposals import PROPOSALS
 from alpha_app.core.review import apply_mock_reviewer_pass
@@ -353,23 +364,26 @@ class AlphaPipeline:
         self.pending_events = keep
 
         for event in batch:
-            result = self._enrich_stage1_result(classify_stage1(event))
+            result = self._enrich_stage1_result(classify_stage1(event), comment_text=event.comment_text)
             self.stage1_results[event.comment_id] = result
         return len(batch)
+
+    def analyze_event(self, event: CommentEvent) -> Stage1Result:
+        return self._enrich_stage1_result(classify_stage1(event), comment_text=event.comment_text)
 
     def _can_auto_action(self, result: Stage1Result) -> bool:
         toxicity = float(result.agent_scores.get("toxicity", 0.0))
         profanity = float(result.agent_scores.get("profanity", 0.0))
         # Guardrail: profanity-only signal cannot force automatic suppression.
-        if profanity > 0 and toxicity < 0.55:
+        if profanity > 0 and toxicity < TOXICITY_TARGETED_BLOCK_THRESHOLD:
             return True
-        if toxicity >= 0.75:
+        if toxicity >= TOXICITY_AUTOBLOCK_THRESHOLD:
             return False
-        if toxicity >= 0.55 and result.offense_target in {"individual", "group"}:
+        if toxicity >= TOXICITY_TARGETED_BLOCK_THRESHOLD and result.offense_target in {"individual", "group"}:
             return False
         return True
 
-    def _enrich_stage1_result(self, result: Stage1Result) -> Stage1Result:
+    def _enrich_stage1_result(self, result: Stage1Result, *, comment_text: str = "") -> Stage1Result:
         calibrated = calibrate_scores(result.agent_scores)
         max_prob = max(calibrated.values()) if calibrated else result.confidence
         entropy = mean_entropy(calibrated, heads={"sentiment", "stance", "irony", "toxicity", "emotion"})
@@ -387,25 +401,46 @@ class AlphaPipeline:
         )
 
         abstain_flags = {
-            "low_confidence": max_prob < 0.55,
-            "high_entropy": entropy > 0.95,
+            "low_confidence": max_prob < LOW_CONFIDENCE_THRESHOLD,
+            "high_entropy": entropy > HIGH_ENTROPY_THRESHOLD,
             "irony_conflict": irony_conflict,
-            "offense_gray_zone": 0.45 <= toxicity <= 0.65,
+            "offense_gray_zone": OFFENSE_GRAY_ZONE_LOW <= toxicity <= OFFENSE_GRAY_ZONE_HIGH,
             "policy_block": not self._can_auto_action(result),
         }
-        review_reason_codes = [f"REVIEW_{k.upper()}" for k, enabled in abstain_flags.items() if enabled]
+        review_reason_codes = sorted({f"REVIEW_{k.upper()}" for k, enabled in abstain_flags.items() if enabled})
         conflict_flags: list[str] = []
         if irony_conflict:
             conflict_flags.append("irony_sentiment_stance_conflict")
         if stance_sentiment_conflict:
             conflict_flags.append("sentiment_stance_conflict")
 
-        return replace(
+        enriched = replace(
             result,
             calibrated_scores=calibrated,
             abstain_flags=abstain_flags,
             conflict_flags=conflict_flags,
             review_reason_codes=review_reason_codes,
+        )
+
+        judge_invoked = False
+        judge_decision_id: str | None = None
+        if INFERENCE_MODE == "hybrid":
+            judge_decision = run_two_pass_judge(
+                enriched,
+                comment_text=comment_text,
+                policy_version=JUDGE_TRIGGER_POLICY_VERSION,
+            )
+            judge_invoked = judge_decision.invoked
+            judge_decision_id = judge_decision.decision_id or None
+            if judge_invoked:
+                review_reason_codes = sorted({*review_reason_codes, "REVIEW_JUDGE_ESCALATION"})
+
+        return replace(
+            enriched,
+            review_reason_codes=review_reason_codes,
+            model_or_rule_version=model_or_rule_versions(INFERENCE_MODE),
+            judge_invoked=judge_invoked,
+            judge_decision_id=judge_decision_id,
         )
 
     def _build_insight(self, proposal_id: str, *, reviewed_rows: list[dict[str, object]]) -> Stage2Insight:
@@ -585,6 +620,8 @@ class AlphaPipeline:
                     "review_reason_codes": list(result.review_reason_codes) if result else [],
                     "conflict_flags": list(result.conflict_flags) if result else [],
                     "abstain_flags": dict(result.abstain_flags) if result else {},
+                    "judge_invoked": bool(result.judge_invoked) if result else False,
+                    "judge_decision_id": result.judge_decision_id if result else None,
                     "moderation_status": state["moderation_status"],
                     "moderation_reason": state["moderation_reason"],
                     "moderated_by": state["moderated_by"],
@@ -802,6 +839,9 @@ class AlphaPipeline:
         emotion_distribution: Counter[str] = Counter()
         abstain_counter: Counter[str] = Counter()
         conflict_counter: Counter[str] = Counter()
+        fairness_counter: Counter[str] = Counter()
+        judge_invocations = 0
+        judge_consistent = 0
         all_calibrated: list[dict[str, float]] = []
         for result in results:
             if result.agent_labels.get("emotion"):
@@ -811,6 +851,12 @@ class AlphaPipeline:
                     abstain_counter.update([flag])
             for conflict in result.conflict_flags:
                 conflict_counter.update([conflict])
+            for fairness_key in result.fairness_slice_keys:
+                fairness_counter.update([fairness_key])
+            if result.judge_invoked:
+                judge_invocations += 1
+                if result.judge_decision_id:
+                    judge_consistent += 1
             if result.calibrated_scores:
                 all_calibrated.append(result.calibrated_scores)
 
@@ -852,6 +898,21 @@ class AlphaPipeline:
         abstain_rows = [{"reason": reason, "count": count} for reason, count in abstain_counter.items()]
         conflict_rows = [{"conflict": name, "count": count} for name, count in conflict_counter.items()]
         emotion_rows = [{"emotion": emotion, "count": count} for emotion, count in emotion_distribution.items()]
+        fairness_rows = [{"slice": name, "count": count} for name, count in fairness_counter.items()]
+        judge_rows = [
+            {
+                "metric": "judge_invocation_rate",
+                "value": round(judge_invocations / max(1, len(results)), 4),
+            },
+            {
+                "metric": "judge_decision_id_completeness",
+                "value": round(judge_consistent / max(1, judge_invocations), 4),
+            },
+            {
+                "metric": "policy_version",
+                "value": JUDGE_TRIGGER_POLICY_VERSION,
+            },
+        ]
 
         bypass_vs_nlp = []
         cumulative_comments = 0
@@ -890,6 +951,10 @@ class AlphaPipeline:
             "abstain_summary": abstain_rows or [{"reason": "none", "count": 0}],
             "conflict_summary": conflict_rows or [{"conflict": "none", "count": 0}],
             "emotion_distribution": emotion_rows or [{"emotion": "neutral", "count": 0}],
+            "judge_reliability": judge_rows,
+            "fairness_summary": fairness_rows or [{"slice": "none", "count": 0}],
+            "evidence_coverage": [evidence_coverage(list(STAGE1_SIGNALS))],
+            "fairness_policy": [{"version": FAIRNESS_POLICY_VERSION}],
             "api_validation": [{"outcome": "pass", "count": self.validation_stats["pass"]}, {"outcome": "fail", "count": self.validation_stats["fail"]}],
             "queue_timeline": self.queue_snapshots,
             "bypass_vs_nlp": bypass_vs_nlp,

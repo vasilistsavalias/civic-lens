@@ -10,6 +10,7 @@ DashboardMode = Literal["basic", "advanced"]
 ProposalStatus = Literal["planned", "active", "delayed", "completed"]
 ServiceType = Literal["water", "electricity", "traffic", "waste", "telecom"]
 OffenseTarget = Literal["individual", "group", "untargeted", "unknown"]
+EvidenceTier = Literal["A", "B", "C"]
 DiscussionSort = Literal["most_reacted", "newest", "most_relevant"]
 ModerationAction = Literal["flag", "hide", "escalate"]
 ModerationStatus = Literal["none", "flagged", "hidden", "escalated"]
@@ -71,6 +72,12 @@ class Stage1Result:
     conflict_flags: list[str] = field(default_factory=list)
     review_reason_codes: list[str] = field(default_factory=list)
     offense_target: OffenseTarget = "unknown"
+    evidence_tier_by_signal: dict[str, EvidenceTier] = field(default_factory=dict)
+    signal_rationale_refs: dict[str, list[str]] = field(default_factory=dict)
+    model_or_rule_version: dict[str, str] = field(default_factory=dict)
+    judge_invoked: bool = False
+    judge_decision_id: str | None = None
+    fairness_slice_keys: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

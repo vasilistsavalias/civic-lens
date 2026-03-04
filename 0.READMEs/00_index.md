@@ -12,6 +12,7 @@ Audience: Both
 - [api_contracts.md](./api_contracts.md)
 - [ai_ml.md](./ai_ml.md)
 - [pipeline_math_algorithms.md](./pipeline_math_algorithms.md)
+- [final_system_spec.md](./final_system_spec.md)
 - [observability.md](./observability.md)
 - [deployment.md](./deployment.md)
 - [testing.md](./testing.md)
@@ -21,6 +22,7 @@ Audience: Both
 - [glossary.md](./glossary.md)
 - [research_ground_truth.md](./research_ground_truth.md)
 - [pipeline_math_algorithms.md](./pipeline_math_algorithms.md)
+- [final_system_spec.md](./final_system_spec.md)
 
 ## Research
 - [research_ground_truth.md](./research_ground_truth.md)

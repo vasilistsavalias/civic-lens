@@ -1,23 +1,26 @@
 # Research-Backed Stage-1 Agent Rubric (Mockup)
 
-> Updated canonical research baseline: [0.READMEs/research_pipeline_blueprint.md](../../0.READMEs/research_pipeline_blueprint.md)
+> Updated canonical research baseline: [0.READMEs/research_ground_truth.md](../../0.READMEs/research_ground_truth.md)
 
 ## Goal
 
 This mockup stage uses deterministic heuristics, but each heuristic is anchored to open/free primary research so we can iterate in a research -> code -> test loop before production models.
 
-## Agent Inventory (10)
+## Agent Inventory (11 + 1 derived)
 
 1. `sentiment`
 2. `stance`
-3. `irony`
-4. `argument_quality`
-5. `profanity`
-6. `toxicity`
-7. `civility`
-8. `structure`
-9. `evidence`
-10. `relevance`
+3. `emotion`
+4. `irony`
+5. `argument_quality`
+6. `profanity`
+7. `toxicity`
+8. `civility`
+9. `structure`
+10. `evidence`
+11. `relevance`
+
+Derived signal used in composition/telemetry: `clarity`.
 
 ## Definitions Used
 
@@ -58,7 +61,7 @@ All scores are bounded in `[0, 1]`.
 - `evidence_score = 0.45*reason_markers + 0.35*source_markers + 0.20*numeric_signal`
 - `structure_score = mean(claim_signal, reason_signal, counter_argument_signal, length_signal)`
 - `relevance_score = proposal/topic keyword hit signal`
-- `argument_quality_score = 0.35*relevance + 0.25*evidence + 0.20*structure + 0.20*civility - 0.20*toxicity - 0.10*profanity`
+- `argument_quality_score = 0.30*relevance + 0.25*evidence + 0.20*structure + 0.15*clarity + 0.10*civility - 0.15*toxicity`
 
 Thresholds:
 
@@ -78,3 +81,11 @@ Thresholds:
 - Davidson et al., "Automated Hate Speech Detection and the Problem of Offensive Language": https://arxiv.org/abs/1703.04009
 - Danescu-Niculescu-Mizil et al., "A Computational Approach to Politeness with Application to Social Factors": https://aclanthology.org/W13-3905/
 - Bassignana et al., "HurtLex: A Multilingual Lexicon of Words to Hurt": https://aclanthology.org/2020.lrec-1.145/
+
+## Evidence Tier Policy
+
+- `Tier A`: direct peer-reviewed task/algorithm grounding.
+- `Tier B`: locally fitted/calibrated values.
+- `Tier C`: engineering heuristics pending local fit.
+
+Current formula weights and routing thresholds are `Tier C` defaults with documented migration path to `Tier B`.

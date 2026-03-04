@@ -9,8 +9,11 @@
 - Quality Spearman: 0.6205
 - ECE proxy: 0.3889
 - Brier proxy: 0.1944
-- Abstain rate: 0.0
+- Abstain rate: 0.2222
 - Slice FPR (non-offensive criticism): 0.0
+- Fairness FPR gap: 0.0
+- Judge invocation rate: 0.2222
+- Evidence coverage ratio: 1.0
 
 ## Limitations
 - Public benchmark subset is mapped and reduced for mockup comparability.
