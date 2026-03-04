@@ -56,6 +56,8 @@ class Stage1Result:
     argument_quality_score: float
     confidence: float
     tags: list[str] = field(default_factory=list)
+    agent_scores: dict[str, float] = field(default_factory=dict)
+    agent_labels: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

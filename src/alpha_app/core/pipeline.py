@@ -340,30 +340,46 @@ class AlphaPipeline:
 
     def architecture_metrics(self) -> dict[str, list[dict[str, object]]]:
         results = list(self.stage1_results.values())
-        irony_counts = Counter("irony_true" if r.irony_flag else "irony_false" for r in results)
-        sentiment_counts = Counter(r.sentiment for r in results)
-        stance_counts = Counter(r.stance for r in results)
+        label_counts: Counter[tuple[str, str]] = Counter()
+        agent_confidence: list[dict[str, object]] = []
 
-        agent_outputs = []
-        for label, count in sentiment_counts.items():
-            agent_outputs.append({"agent": "sentiment", "label": label, "count": count})
-        for label, count in stance_counts.items():
-            agent_outputs.append({"agent": "stance", "label": label, "count": count})
-        for label, count in irony_counts.items():
-            agent_outputs.append({"agent": "irony", "label": label, "count": count})
-        for r in results:
-            agent_outputs.append({"agent": "argument_quality", "label": "score_bin", "count": int(r.argument_quality_score * 10)})
+        for result in results:
+            if result.agent_labels:
+                for agent, label in result.agent_labels.items():
+                    label_counts[(agent, str(label))] += 1
+            else:
+                label_counts[("sentiment", result.sentiment)] += 1
+                label_counts[("stance", result.stance)] += 1
+                label_counts[("irony", "ironic" if result.irony_flag else "non_ironic")] += 1
+                label_counts[("argument_quality", f"bin_{int(result.argument_quality_score * 10)}")] += 1
 
-        agent_confidence = []
-        for r in results:
-            agent_confidence.append({"agent": "sentiment", "value": r.confidence})
-            agent_confidence.append({"agent": "stance", "value": max(0.4, r.confidence - 0.05)})
-            agent_confidence.append({"agent": "irony", "value": 0.78 if r.irony_flag else 0.62})
-            agent_confidence.append({"agent": "argument_quality", "value": r.argument_quality_score})
+            if result.agent_scores:
+                for agent, value in result.agent_scores.items():
+                    agent_confidence.append({"agent": agent, "value": float(value)})
+            else:
+                agent_confidence.append({"agent": "sentiment", "value": result.confidence})
+                agent_confidence.append({"agent": "stance", "value": max(0.4, result.confidence - 0.05)})
+                agent_confidence.append({"agent": "irony", "value": 0.78 if result.irony_flag else 0.62})
+                agent_confidence.append({"agent": "argument_quality", "value": result.argument_quality_score})
+
+        agent_outputs = [{"agent": agent, "label": label, "count": count} for (agent, label), count in sorted(label_counts.items())]
+
+        classifier_agents = {"sentiment", "stance", "profanity", "toxicity", "relevance"}
+        llm_agents = {"irony", "argument_quality", "civility", "structure", "evidence"}
+        classifier_values = [float(x["value"]) for x in agent_confidence if str(x["agent"]) in classifier_agents]
+        llm_values = [float(x["value"]) for x in agent_confidence if str(x["agent"]) in llm_agents]
 
         classifier_vs_llm = [
-            {"family": "classifier", "workload": len(results) * 2, "avg_confidence": round(sum(x["value"] for x in agent_confidence if x["agent"] in {"sentiment", "stance"}) / max(1, len([x for x in agent_confidence if x["agent"] in {"sentiment", "stance"}])), 2)},
-            {"family": "llm", "workload": len(results) * 2, "avg_confidence": round(sum(x["value"] for x in agent_confidence if x["agent"] in {"irony", "argument_quality"}) / max(1, len([x for x in agent_confidence if x["agent"] in {"irony", "argument_quality"}])), 2)},
+            {
+                "family": "classifier",
+                "workload": len(classifier_values),
+                "avg_confidence": round(sum(classifier_values) / max(1, len(classifier_values)), 2),
+            },
+            {
+                "family": "llm",
+                "workload": len(llm_values),
+                "avg_confidence": round(sum(llm_values) / max(1, len(llm_values)), 2),
+            },
         ]
 
         bypass_vs_nlp = []
