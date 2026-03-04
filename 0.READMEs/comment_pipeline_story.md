@@ -15,6 +15,133 @@ This document is the exact story you can present to your supervisor: what happen
 
 ---
 
+## Super Simple Trace (Like You Asked)
+
+Think of this like a packet moving through a network.
+
+Input comment:
+```text
+"Great plan, yeah right /s. I oppose this strongly because traffic data from 2025 report shows risks."
+```
+
+### Pass 0: Ingestion
+- System receives comment and proposal id.
+- Checks: text not empty, proposal exists, timestamp valid.
+- Result: `CommentEvent` accepted and queued.
+
+Mini output:
+```json
+{
+  "accepted": true,
+  "queued": true,
+  "comment_id": "c_12345"
+}
+```
+
+### Pass 1: Heuristic Heads (Rule Engine)
+- Tokenizer sees words like:
+  - `great` -> positive signal
+  - `oppose` -> against stance signal
+  - `yeah right`, `/s` -> irony signal
+  - `because`, `data`, `2025`, `report` -> evidence signal
+- Heads produce labels + scores.
+
+Mini output:
+```json
+{
+  "sentiment": "neutral",
+  "stance": "against",
+  "irony_flag": true,
+  "agent_scores": {
+    "evidence": 0.8,
+    "toxicity": 0.1,
+    "argument_quality": 0.62
+  }
+}
+```
+
+### Pass 2: Calibration
+- Raw scores are adjusted to safer confidence values.
+- Example: confidence is normalized via temperature scaling.
+
+Mini output:
+```json
+{
+  "calibrated_scores": {
+    "sentiment": 0.54,
+    "stance": 0.71,
+    "irony": 0.83
+  }
+}
+```
+
+### Pass 3: Routing (Should we escalate?)
+- Rules check:
+  - low confidence?
+  - high entropy?
+  - conflict (irony + stance/sentiment mismatch)?
+  - gray zone toxicity?
+- If any true -> add review reason code.
+
+Mini output:
+```json
+{
+  "abstain_flags": {
+    "irony_conflict": true,
+    "low_confidence": false
+  },
+  "review_reason_codes": [
+    "REVIEW_IRONY_CONFLICT"
+  ]
+}
+```
+
+### Pass 4: Hybrid Judge (Only if Hybrid Mode ON)
+- If `INFERENCE_MODE=hybrid` and case is uncertain/conflicted:
+  - Pass A: rubric JSON
+  - Pass B: consistency check
+- Adds judge metadata only.
+
+Mini output:
+```json
+{
+  "judge_invoked": true,
+  "judge_decision_id": "judge_ab12cd34ef56",
+  "review_reason_codes": [
+    "REVIEW_IRONY_CONFLICT",
+    "REVIEW_JUDGE_ESCALATION"
+  ]
+}
+```
+
+### Pass 5: Review Pass
+- Reviewer layer may correct final interpretation.
+- Example: irony can downgrade overly positive sentiment.
+
+Mini output:
+```json
+{
+  "review_status": "corrected",
+  "final_sentiment": "neutral"
+}
+```
+
+### Pass 6: UI + Dashboard
+- Final row appears in thread.
+- Right panel metrics update (risk, queue pressure, concerns).
+
+### Pass 7: Reports
+- Evaluation files update with:
+  - F1 metrics
+  - fairness gaps
+  - judge reliability
+  - evidence coverage
+
+If you want one sentence for your supervisor:
+> “Comment comes in, heuristics extract structured signals, calibration normalizes confidence, conflict logic decides escalation, optional hybrid judge handles hard cases, reviewer finalizes, then governance metrics are reported.”
+
+---
+
 ## Example Input Comment
 
 ```text
