@@ -207,40 +207,40 @@ class AlphaPipeline:
         self._reset_generated_state()
         rng = random.Random(seed)
         base = datetime(2026, 1, 15, 8, 0, 0)
-        authors = ["Maria", "Nikos", "Eleni", "George", "Anna", "Sofia", "Dimitris", "Katerina", "John", "Alex"]
+        authors = ["Μαρία", "Νίκος", "Ελένη", "Γιώργος", "Άννα", "Σοφία", "Δημήτρης", "Κατερίνα", "Ιωάννης", "Αλέξης"]
         stance_templates = {
             "support": [
-                "I support this plan because it improves daily mobility and public life.",
-                "Very positive direction, please keep transparent milestones and budget updates.",
-                "Good civic move if maintenance and safety are guaranteed.",
+                "Στηρίζω αυτή την πρόταση γιατί βελτιώνει την καθημερινή κινητικότητα και τη ζωή στην πόλη.",
+                "Πολύ θετική κατεύθυνση, αρκεί να υπάρχουν διαφάνεια και σαφή στάδια υλοποίησης.",
+                "Καλή δημόσια παρέμβαση, αν διασφαλιστούν συντήρηση και ασφάλεια.",
             ],
             "against": [
-                "I disagree unless traffic alternatives are ready first.",
-                "This sounds risky for access and local business operations.",
-                "I am worried this will fail without proper implementation details.",
+                "Διαφωνώ αν δεν υπάρχουν πρώτα εναλλακτικές λύσεις κυκλοφορίας.",
+                "Αυτό μοιάζει ριψοκίνδυνο για την πρόσβαση και τη λειτουργία των τοπικών επιχειρήσεων.",
+                "Φοβάμαι ότι θα αποτύχει χωρίς σοβαρές λεπτομέρειες υλοποίησης.",
             ],
             "mixed": [
-                "I agree in principle, but we need clear timelines and measurable goals.",
-                "Interesting proposal, however execution quality will decide the outcome.",
-                "Support with conditions: evidence, accountability, and fairness.",
+                "Συμφωνώ ως ιδέα, αλλά χρειάζονται σαφή χρονοδιαγράμματα και μετρήσιμοι στόχοι.",
+                "Ενδιαφέρουσα πρόταση, όμως το αποτέλεσμα θα κριθεί από την ποιότητα υλοποίησης.",
+                "Στήριξη με όρους: τεκμηρίωση, λογοδοσία και δικαιοσύνη.",
             ],
             "irony": [
-                "Yeah right, because all previous promises worked perfectly /s.",
-                "Great, another magical solution with zero delays, sure.",
+                "Ναι βέβαια, αφού όλες οι προηγούμενες υποσχέσεις εφαρμόστηκαν τέλεια /s.",
+                "Τέλεια, άλλη μία μαγική λύση χωρίς καθυστερήσεις, φυσικά.",
             ],
             "harsh_evidence": [
-                "This is badly designed; data from district reports show current capacity is insufficient.",
-                "Harsh truth: the budget ratio is off, and the published figures do not align.",
+                "Ο σχεδιασμός είναι προβληματικός· τα στοιχεία των αναφορών δείχνουν ανεπαρκή χωρητικότητα.",
+                "Η σκληρή αλήθεια είναι ότι οι αναλογίες του κόστους δεν βγαίνουν και τα δημοσιευμένα νούμερα δεν συμφωνούν.",
             ],
             "offtopic": [
-                "Unrelated note: weather was terrible today and buses were late.",
-                "Not about this proposal, but city noise at night keeps increasing.",
+                "Άσχετο με την πρόταση: σήμερα η κίνηση ήταν χαοτική και τα λεωφορεία άργησαν πολύ.",
+                "Δεν αφορά άμεσα την πρόταση, αλλά ο νυχτερινός θόρυβος στη γειτονιά αυξάνεται συνεχώς.",
             ],
         }
         proposal_context = {
-            "deth_park": "park and green space",
-            "nikis_pedestrian": "waterfront pedestrian corridor",
-            "metro_west": "west metro expansion",
+            "deth_park": "πάρκο και πράσινο",
+            "nikis_pedestrian": "παραλιακή πεζοδρόμηση",
+            "metro_west": "επέκταση μετρό δυτικά",
         }
         reply_prob = {1: 0.45, 2: 0.20, 3: 0.08}
 
@@ -272,10 +272,9 @@ class AlphaPipeline:
             return "offtopic"
 
         def build_text(kind: str, proposal_id: str) -> str:
-            prefix = proposal_context.get(proposal_id, "city proposal")
+            prefix = proposal_context.get(proposal_id, "δημοτική πρόταση")
             phrase = rng.choice(stance_templates[kind])
-            language_switch = "" if rng.random() < 0.82 else " We need clear civic governance and accountability."
-            return f"[{prefix}] {phrase}{language_switch}"
+            return f"[{prefix}] {phrase}"
 
         def add_replies(parent: CommentEvent, proposal_id: str, depth: int, ts: datetime) -> None:
             if depth > MAX_THREAD_DEPTH:
@@ -288,7 +287,7 @@ class AlphaPipeline:
                 reply_ts = ts + timedelta(minutes=2 + idx + rng.randint(0, 4))
                 reply = self.submit_comment(
                     proposal_id=proposal_id,
-                    comment_text=f"Reply: {build_text(kind, proposal_id)}",
+                    comment_text=f"Απάντηση: {build_text(kind, proposal_id)}",
                     reactions=build_reactions(kind),
                     author_name=rng.choice(authors),
                     submitted_at=reply_ts,

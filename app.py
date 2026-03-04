@@ -200,16 +200,25 @@ def render_discussion_workspace(proposal_id: str) -> None:
     )
     total_rows = pipeline.discussion_total_count(proposal_id, include_replies=include_replies, filters=active_filters)
     author_by_id = {row["comment_id"]: row["author_name"] for row in rows}
+    row_by_id = {str(row["comment_id"]): row for row in rows}
+    children_by_parent: dict[str, list[str]] = {}
+    for row in rows:
+        cid = str(row["comment_id"])
+        parent = row["parent_comment_id"]
+        if parent is not None:
+            children_by_parent.setdefault(str(parent), []).append(cid)
+    root_ids = [str(row["comment_id"]) for row in rows if row["parent_comment_id"] is None or str(row["parent_comment_id"]) not in row_by_id]
 
     left, right = st.columns([2.0, 1.0], gap="large")
     with left:
         st.markdown("#### Συζήτηση κατοίκων")
         st.caption(f"Εμφανίζονται {len(rows)} από {total_rows} σχόλια/απαντήσεις")
-        for row in rows:
+        def render_node(comment_id: str) -> None:
+            row = row_by_id[comment_id]
             depth = int(row["thread_depth"])
             parent_id = row["parent_comment_id"]
-            parent_author = author_by_id.get(parent_id, "κάτοικο") if parent_id else None
-            margin_left = depth * 26
+            parent_author = author_by_id.get(str(parent_id), "κάτοικο") if parent_id else None
+            margin_left = depth * 24
             st.markdown(f"<div style='margin-left:{margin_left}px'>", unsafe_allow_html=True)
             with st.container(border=True):
                 if parent_id:
@@ -238,7 +247,15 @@ def render_discussion_workspace(proposal_id: str) -> None:
                             "abstain_flags": row["abstain_flags"],
                         }
                     )
+            child_ids = children_by_parent.get(comment_id, [])
+            if child_ids:
+                with st.expander(f"Απαντήσεις ({len(child_ids)})", expanded=False):
+                    for child_id in child_ids:
+                        render_node(child_id)
             st.markdown("</div>", unsafe_allow_html=True)
+
+        for root_id in root_ids:
+            render_node(root_id)
 
         if len(rows) < total_rows:
             if st.button("Φόρτωση περισσότερων", key=f"load_more_{proposal_id}", use_container_width=True):
