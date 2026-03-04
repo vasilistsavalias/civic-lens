@@ -11,6 +11,7 @@ Audience: Both
 - [data_contracts.md](./data_contracts.md)
 - [api_contracts.md](./api_contracts.md)
 - [ai_ml.md](./ai_ml.md)
+- [pipeline_math_algorithms.md](./pipeline_math_algorithms.md)
 - [observability.md](./observability.md)
 - [deployment.md](./deployment.md)
 - [testing.md](./testing.md)
@@ -18,20 +19,11 @@ Audience: Both
 - [performance.md](./performance.md)
 - [security.md](./security.md)
 - [glossary.md](./glossary.md)
-- [research_pipeline_blueprint.md](./research_pipeline_blueprint.md)
-- [review_governance.md](./review_governance.md)
+- [research_ground_truth.md](./research_ground_truth.md)
+- [pipeline_math_algorithms.md](./pipeline_math_algorithms.md)
 
-## Research Pack
-- [research_ground_truth/README.md](./research_ground_truth/README.md)
-- [research_ground_truth/computational_politeness_social_factors/research_ground_truth.md](./research_ground_truth/computational_politeness_social_factors/research_ground_truth.md)
-- [research_ground_truth/davidson_offensive_vs_hate/research_ground_truth.md](./research_ground_truth/davidson_offensive_vs_hate/research_ground_truth.md)
-- [research_ground_truth/hurtlex_multilingual_lexicon/research_ground_truth.md](./research_ground_truth/hurtlex_multilingual_lexicon/research_ground_truth.md)
-- [research_ground_truth/offenseval_2019_offensive_targeted/research_ground_truth.md](./research_ground_truth/offenseval_2019_offensive_targeted/research_ground_truth.md)
-- [research_ground_truth/semeval2016_stance_detection/research_ground_truth.md](./research_ground_truth/semeval2016_stance_detection/research_ground_truth.md)
-- [research_ground_truth/semeval2017_sentiment_twitter/research_ground_truth.md](./research_ground_truth/semeval2017_sentiment_twitter/research_ground_truth.md)
-- [research_ground_truth/semeval2018_irony_detection/research_ground_truth.md](./research_ground_truth/semeval2018_irony_detection/research_ground_truth.md)
-- [research_ground_truth/stab_gurevych_argumentation_structures/research_ground_truth.md](./research_ground_truth/stab_gurevych_argumentation_structures/research_ground_truth.md)
-- [research_ground_truth/wachsmuth_argument_search_engine/research_ground_truth.md](./research_ground_truth/wachsmuth_argument_search_engine/research_ground_truth.md)
+## Research
+- [research_ground_truth.md](./research_ground_truth.md)
 
 ## How To Verify
 - Confirm every link above opens.
