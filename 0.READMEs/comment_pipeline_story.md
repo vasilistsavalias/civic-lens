@@ -1,9 +1,11 @@
 ﻿# Comment Journey Through the Civic Lens Pipeline
 
 ## Purpose
+
 This document is the exact story you can present to your supervisor: what happens when **one comment** enters the system, pass by pass, including algorithms, thresholds, and outputs.
 
 ## TL;DR Flow
+
 1. Ingestion + validation
 2. Stage-1 multi-head analysis (11 agents + clarity)
 3. Calibration pass
@@ -20,16 +22,19 @@ This document is the exact story you can present to your supervisor: what happen
 Think of this like a packet moving through a network.
 
 Input comment:
+
 ```text
 "Great plan, yeah right /s. I oppose this strongly because traffic data from 2025 report shows risks."
 ```
 
 ### Pass 0: Ingestion
+
 - System receives comment and proposal id.
 - Checks: text not empty, proposal exists, timestamp valid.
 - Result: `CommentEvent` accepted and queued.
 
 Mini output:
+
 ```json
 {
   "accepted": true,
@@ -39,6 +44,7 @@ Mini output:
 ```
 
 ### Pass 1: Heuristic Heads (Rule Engine)
+
 - Tokenizer sees words like:
   - `great` -> positive signal
   - `oppose` -> against stance signal
@@ -47,6 +53,7 @@ Mini output:
 - Heads produce labels + scores.
 
 Mini output:
+
 ```json
 {
   "sentiment": "neutral",
@@ -61,10 +68,12 @@ Mini output:
 ```
 
 ### Pass 2: Calibration
+
 - Raw scores are adjusted to safer confidence values.
 - Example: confidence is normalized via temperature scaling.
 
 Mini output:
+
 ```json
 {
   "calibrated_scores": {
@@ -76,6 +85,7 @@ Mini output:
 ```
 
 ### Pass 3: Routing (Should we escalate?)
+
 - Rules check:
   - low confidence?
   - high entropy?
@@ -84,6 +94,7 @@ Mini output:
 - If any true -> add review reason code.
 
 Mini output:
+
 ```json
 {
   "abstain_flags": {
@@ -97,12 +108,14 @@ Mini output:
 ```
 
 ### Pass 4: Hybrid Judge (Only if Hybrid Mode ON)
+
 - If `INFERENCE_MODE=hybrid` and case is uncertain/conflicted:
   - Pass A: rubric JSON
   - Pass B: consistency check
 - Adds judge metadata only.
 
 Mini output:
+
 ```json
 {
   "judge_invoked": true,
@@ -115,10 +128,12 @@ Mini output:
 ```
 
 ### Pass 5: Review Pass
+
 - Reviewer layer may correct final interpretation.
 - Example: irony can downgrade overly positive sentiment.
 
 Mini output:
+
 ```json
 {
   "review_status": "corrected",
@@ -127,10 +142,12 @@ Mini output:
 ```
 
 ### Pass 6: UI + Dashboard
+
 - Final row appears in thread.
 - Right panel metrics update (risk, queue pressure, concerns).
 
 ### Pass 7: Reports
+
 - Evaluation files update with:
   - F1 metrics
   - fairness gaps
@@ -149,6 +166,7 @@ If you want one sentence for your supervisor:
 ```
 
 Context:
+
 - `proposal_id = metro_west`
 - `submitted_at = 2026-03-01 12:00:00`
 - reactions initially empty or low
@@ -160,10 +178,12 @@ This is intentionally mixed: positive token + irony + against stance + evidence 
 ## Pass 0: Ingestion + Validation
 
 Where:
+
 - `AlphaPipeline.submit_comment(...)` in `src/alpha_app/core/pipeline.py`
 - `validate_event(...)` in `src/alpha_app/core/mock_engine.py`
 
 What happens:
+
 1. Reaction keys are normalized (`likes/support/laugh` -> canonical keys).
 2. Thread depth and parent consistency are checked.
 3. Proposal id must exist.
@@ -171,6 +191,7 @@ What happens:
 5. Event is queued (`pending_events`) and indexed (`comment_index`).
 
 Output after this pass:
+
 - A valid `CommentEvent` exists in queue/storage, but no NLP decision yet.
 
 ---
@@ -178,9 +199,11 @@ Output after this pass:
 ## Pass 1: Stage-1 Multi-Head Analysis (Deterministic Mock++)
 
 Where:
+
 - `classify_stage1(...)` in `src/alpha_app/core/mock_engine.py`
 
 Heads run in parallel-style logic on normalized tokens:
+
 1. `sentiment`
 2. `stance`
 3. `emotion`
@@ -192,14 +215,17 @@ Heads run in parallel-style logic on normalized tokens:
 9. `structure`
 10. `evidence`
 11. `relevance`
+
 + derived `clarity`
 
 ### Key internals
 
 Normalization:
+
 - lowercase + accent strip + token split.
 
 Core formulas:
+
 - `toxicity = 0.45*profanity + 0.35*insults + 0.10*caps + 0.10*exclamation`
 - `civility = 0.60*(1-toxicity) + 0.40*politeness`
 - `evidence = 0.45*reason + 0.35*source + 0.20*numeric`
@@ -207,6 +233,7 @@ Core formulas:
 - `quality = 0.30*relevance + 0.25*evidence + 0.20*structure + 0.15*clarity + 0.10*civility - 0.15*toxicity`
 
 Output object:
+
 - `Stage1Result` with:
   - labels (`agent_labels`)
   - scores (`agent_scores`)
@@ -220,26 +247,63 @@ Output object:
 ## Pass 2: Calibration
 
 Where:
+
 - `calibrate_scores(...)` in `src/alpha_app/core/calibration.py`
 - `_enrich_stage1_result(...)` in `src/alpha_app/core/pipeline.py`
 
 What happens:
+
 1. Raw head probabilities are temperature-scaled:
    - `p_cal = sigmoid(logit(p_raw)/T)`
 2. `calibrated_scores` are attached to `Stage1Result`.
 3. Entropy is computed on selected heads (`sentiment, stance, irony, toxicity, emotion`).
 
 Why:
+
 - Confidence numbers become more policy-usable than raw head outputs.
+
+### How this connects to one comment decision
+
+Assume one comment gets these raw head confidences:
+
+- `sentiment_raw = 0.62`
+- `stance_raw = 0.58`
+- `irony_raw = 0.51`
+
+After temperature scaling with `T=1.5`, they become less sharp:
+
+- `sentiment_cal ~= 0.59`
+- `stance_cal ~= 0.56`
+- `irony_cal ~= 0.50`
+
+Routing then reads the calibrated values:
+
+- if `max_prob < 0.55` -> add `REVIEW_LOW_CONFIDENCE`
+- if entropy is high (`> 0.95`) -> add `REVIEW_HIGH_ENTROPY`
+
+Example:
+
+- `max_prob = 0.56` -> no low-confidence flag by this rule.
+- `max_prob = 0.53` -> low-confidence flag is raised.
+
+Important distinction:
+
+- **Temperature is used during per-comment inference** (real-time routing input).
+- **Bins are used during evaluation only** to compute ECE over many comments:
+  - split predictions into confidence ranges (for example 15 bins),
+  - compare average confidence vs observed accuracy per bin,
+  - use the gap to decide whether calibration/thresholds need retuning.
 
 ---
 
 ## Pass 3: Abstain / Conflict / Review Routing
 
 Where:
+
 - `_enrich_stage1_result(...)` in `src/alpha_app/core/pipeline.py`
 
 Triggers:
+
 - low confidence: `max_prob < 0.55`
 - high entropy: `mean_entropy > 0.95`
 - irony conflict
@@ -247,9 +311,11 @@ Triggers:
 - policy block (guardrail logic)
 
 Guardrail:
+
 - Profanity-only signal does not auto-block by itself.
 
 Outputs added:
+
 - `abstain_flags`
 - `conflict_flags`
 - `review_reason_codes` (e.g., `REVIEW_LOW_CONFIDENCE`, etc.)
@@ -259,21 +325,26 @@ Outputs added:
 ## Pass 4: Hybrid Judge (Only if `INFERENCE_MODE=hybrid`)
 
 Where:
+
 - `run_two_pass_judge(...)` in `src/alpha_app/core/judge.py`
 
 When invoked:
+
 - conflict / uncertainty / borderline moderation conditions.
 
 Two-pass scaffold:
+
 1. Pass A: rubric-like JSON scores + rationale tags.
 2. Pass B: consistency/policy checks.
 
 Outputs added:
+
 - `judge_invoked`
 - `judge_decision_id`
 - extra review reason: `REVIEW_JUDGE_ESCALATION` when applicable.
 
 Important:
+
 - Judge is advisory escalation logic, not sole final policy authority.
 
 ---
@@ -281,9 +352,11 @@ Important:
 ## Pass 5: Review Pass
 
 Where:
+
 - `apply_mock_reviewer_pass(...)` in `src/alpha_app/core/review.py`
 
 What happens:
+
 1. Builds initial review row (sentiment, stance, quality, topics, safety, etc.).
 2. Applies deterministic reviewer corrections (e.g., irony-aware adjustments).
 3. Sets review status:
@@ -297,6 +370,7 @@ What happens:
    - per-indicator correction rates
 
 Outputs:
+
 - `analysis/initial/stage1_results.*`
 - `analysis/final/stage1_results.*`
 - `analysis/final/corrections.json`
@@ -307,9 +381,11 @@ Outputs:
 ## Pass 6: Feed Materialization (UI-ready Row)
 
 Where:
+
 - `discussion_feed(...)` in `src/alpha_app/core/pipeline.py`
 
 What happens:
+
 1. Sort + filter + pagination on thread graph.
 2. Injects analysis fields into each visible row:
    - sentiment/stance/quality
@@ -323,9 +399,11 @@ What happens:
 ## Pass 7: Dashboard + Architecture Telemetry
 
 Where:
+
 - `architecture_metrics()` in `src/alpha_app/core/pipeline.py`
 
 Generated blocks include:
+
 - `calibration_metrics`
 - `abstain_summary`
 - `conflict_summary`
@@ -341,9 +419,11 @@ These are the supervisor-visible technical governance signals.
 ## Pass 8: Evaluation Harness (Public+Mock)
 
 Where:
+
 - `tools/eval/run_eval.py`
 
 Metrics produced:
+
 - Macro-F1 + per-class recall (sentiment/stance/toxicity)
 - Emotion micro-F1
 - Quality Pearson/Spearman
@@ -355,6 +435,7 @@ Metrics produced:
 - Evidence coverage ratios
 
 Outputs:
+
 - `docs/research/eval_reports/latest_report.json`
 - `docs/research/eval_reports/latest_report.md`
 
@@ -365,6 +446,7 @@ Outputs:
 "Each comment goes through deterministic multi-head analysis, calibration, uncertainty/conflict routing, optional two-pass judge escalation in hybrid mode, reviewer correction, and finally governance reporting with fairness and evidence-tier traceability."
 
 ## Related Docs
+
 - `0.READMEs/final_system_spec.md`
 - `0.READMEs/pipeline_math_algorithms.md`
 - `0.READMEs/research_ground_truth.md`
