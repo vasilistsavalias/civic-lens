@@ -63,6 +63,15 @@ def _initial_row(comment: CommentEvent, result: Stage1Result) -> dict[str, objec
         "confidence": result.confidence,
         "irony_flag": result.irony_flag,
         "tags": list(result.tags),
+        "emotion_scores": dict(result.emotion_scores),
+        "emotion_intensity": float(result.emotion_intensity),
+        "agent_scores": dict(result.agent_scores),
+        "agent_labels": dict(result.agent_labels),
+        "calibrated_scores": dict(result.calibrated_scores),
+        "abstain_flags": dict(result.abstain_flags),
+        "conflict_flags": list(result.conflict_flags),
+        "review_reason_codes": list(result.review_reason_codes),
+        "offense_target": result.offense_target,
     }
 
 
@@ -224,4 +233,3 @@ def apply_mock_reviewer_pass(
 
     serialized_corrections = [asdict(record) for record in correction_records]
     return initial_rows, final_rows, serialized_corrections, metrics
-

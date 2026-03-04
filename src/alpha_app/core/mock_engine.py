@@ -10,6 +10,7 @@ from alpha_app.domain.models import CommentEvent, Stage1Result
 AGENT_NAMES = (
     "sentiment",
     "stance",
+    "emotion",
     "irony",
     "argument_quality",
     "profanity",
@@ -133,6 +134,25 @@ COUNTERARG_MARKERS = {
     "but",
 }
 SOURCE_MARKERS = {"http", "www", "source", "study", "report", "data", "\u03c0\u03b7\u03b3\u03b7", "\u03bc\u03b5\u03bb\u03b5\u03c4\u03b7"}
+CLARITY_MARKERS = {
+    "\u03c3\u03b1\u03c6\u03b7",
+    "\u03c3\u03c5\u03b3\u03ba\u03b5\u03ba\u03c1\u03b9\u03bc\u03b5\u03bd\u03b1",
+    "\u03c0\u03c1\u03bf\u03c4\u03b1\u03c3\u03b7",
+    "clear",
+    "specifically",
+    "concretely",
+}
+OFFENSE_TARGET_GROUP_MARKERS = {"immigrants", "foreigners", "muslims", "women", "men", "\u03bc\u03b5\u03c4\u03b1\u03bd\u03b1\u03c3\u03c4\u03b5\u03c2"}
+OFFENSE_TARGET_INDIVIDUAL_MARKERS = {"you", "he", "she", "\u03b5\u03c3\u03c5", "\u03b1\u03c5\u03c4\u03bf\u03c2", "\u03b1\u03c5\u03c4\u03b7"}
+
+EMOTION_KEYWORDS = {
+    "anger": {"\u03bf\u03c1\u03b3\u03b7", "\u03b8\u03c5\u03bc\u03cc\u03c2", "angry", "furious", "rage"},
+    "fear": {"\u03c6\u03bf\u03b2\u03bf\u03c2", "\u03c6\u03bf\u03b2\u03b1\u03bc\u03b1\u03b9", "fear", "afraid", "worry"},
+    "sadness": {"\u03bb\u03c5\u03c0\u03b7", "\u03c3\u03c4\u03b5\u03bd\u03b1\u03c7\u03c9\u03c1\u03b9\u03b1", "sad", "disappointed", "upset"},
+    "joy": {"\u03c7\u03b1\u03c1\u03b1", "\u03c7\u03b1\u03b9\u03c1\u03bf\u03bc\u03b1\u03b9", "happy", "great", "excellent"},
+    "trust": {"\u03b5\u03bc\u03c0\u03b9\u03c3\u03c4\u03bf\u03c3\u03c5\u03bd\u03b7", "\u03b5\u03bc\u03c0\u03b9\u03c3\u03c4\u03b5\u03c5\u03bf\u03bc\u03b1\u03b9", "trust", "reliable"},
+    "disgust": {"\u03b1\u03b7\u03b4\u03b9\u03b1", "\u03b1\u03c0\u03b5\u03c7\u03b8\u03b1\u03bd\u03bf\u03bc\u03b1\u03b9", "disgusting", "gross"},
+}
 
 TOPIC_KEYWORDS = {
     "green_space": {
@@ -241,6 +261,22 @@ def classify_stage1(event: CommentEvent) -> Stage1Result:
         stance = "neutral"
     stance_scalar = {"for": 1.0, "neutral": 0.5, "against": 0.0}[stance]
 
+    # Deterministic multi-label emotion head with normalized intensity.
+    emotion_scores = {label: 0.0 for label in ("anger", "fear", "sadness", "joy", "trust", "disgust", "neutral")}
+    emotion_hits: dict[str, int] = {}
+    for emotion, keys in EMOTION_KEYWORDS.items():
+        hits = len(words & keys)
+        emotion_hits[emotion] = hits
+    total_emotion_hits = sum(emotion_hits.values())
+    if total_emotion_hits > 0:
+        for emotion, hits in emotion_hits.items():
+            emotion_scores[emotion] = round(_bounded(hits / max(1, total_emotion_hits)), 2)
+        emotion_scores["neutral"] = round(_bounded(1.0 - sum(v for k, v in emotion_scores.items() if k != "neutral")), 2)
+    else:
+        emotion_scores["neutral"] = 1.0
+    emotion_intensity = round(_bounded(total_emotion_hits / 4.0), 2)
+    dominant_emotion = max(emotion_scores.items(), key=lambda x: x[1])[0]
+
     irony_flag = _contains_any_phrase(normalized, IRONY_MARKERS)
     irony_score = 1.0 if irony_flag else 0.0
 
@@ -265,6 +301,7 @@ def classify_stage1(event: CommentEvent) -> Stage1Result:
 
     reason_hits = len(words & REASON_MARKERS)
     source_hits = len(words & SOURCE_MARKERS)
+    clarity_hits = len(words & CLARITY_MARKERS)
     numeric_signal = 1.0 if any(ch.isdigit() for ch in raw_text) else 0.0
     evidence_score = _bounded(0.45 * _bounded(reason_hits / 2.0) + 0.35 * _bounded(source_hits / 2.0) + 0.2 * numeric_signal)
     if evidence_score >= 0.6:
@@ -297,14 +334,16 @@ def classify_stage1(event: CommentEvent) -> Stage1Result:
         relevance_score = 0.0
     relevance_label = "relevant" if relevance_score >= 0.6 else "off_topic"
 
+    clarity_score = _bounded(0.5 * _bounded(clarity_hits / 2.0) + 0.5 * _bounded(len(words) / 20.0))
+
     argument_quality_score = round(
         _bounded(
-            0.35 * relevance_score
+            0.30 * relevance_score
             + 0.25 * evidence_score
             + 0.2 * structure_score
-            + 0.2 * civility_score
-            - 0.2 * toxicity_score
-            - 0.1 * profanity_score
+            + 0.15 * clarity_score
+            + 0.10 * civility_score
+            - 0.15 * toxicity_score
         ),
         2,
     )
@@ -318,6 +357,15 @@ def classify_stage1(event: CommentEvent) -> Stage1Result:
     certainty = 0.35 + min(0.25, abs(pos_score - neg_score) * 0.12) + min(0.2, abs(for_score - against_score) * 0.1) + 0.2 * structure_score
     confidence = round(_bounded(certainty), 2)
 
+    offense_target = "unknown"
+    if toxicity_score >= 0.45 or profanity_hits > 0:
+        if words & OFFENSE_TARGET_GROUP_MARKERS:
+            offense_target = "group"
+        elif words & OFFENSE_TARGET_INDIVIDUAL_MARKERS:
+            offense_target = "individual"
+        else:
+            offense_target = "untargeted"
+
     tags: list[str] = []
     for topic, keys in TOPIC_KEYWORDS.items():
         if words & keys:
@@ -326,6 +374,7 @@ def classify_stage1(event: CommentEvent) -> Stage1Result:
     agent_scores = {
         "sentiment": round(sentiment_scalar, 2),
         "stance": round(stance_scalar, 2),
+        "emotion": round(max(v for k, v in emotion_scores.items() if k != "neutral"), 2),
         "irony": round(irony_score, 2),
         "argument_quality": round(argument_quality_score, 2),
         "profanity": round(profanity_score, 2),
@@ -334,10 +383,12 @@ def classify_stage1(event: CommentEvent) -> Stage1Result:
         "structure": round(structure_score, 2),
         "evidence": round(evidence_score, 2),
         "relevance": round(relevance_score, 2),
+        "clarity": round(clarity_score, 2),
     }
     agent_labels = {
         "sentiment": sentiment,
         "stance": stance,
+        "emotion": dominant_emotion,
         "irony": "ironic" if irony_flag else "non_ironic",
         "argument_quality": argument_quality_label,
         "profanity": profanity_label,
@@ -346,6 +397,7 @@ def classify_stage1(event: CommentEvent) -> Stage1Result:
         "structure": structure_label,
         "evidence": evidence_label,
         "relevance": relevance_label,
+        "clarity": "clear" if clarity_score >= 0.6 else "unclear",
     }
 
     return Stage1Result(
@@ -359,4 +411,7 @@ def classify_stage1(event: CommentEvent) -> Stage1Result:
         tags=sorted(tags),
         agent_scores=agent_scores,
         agent_labels=agent_labels,
+        emotion_scores=emotion_scores,
+        emotion_intensity=emotion_intensity,
+        offense_target=offense_target,  # type: ignore[arg-type]
     )

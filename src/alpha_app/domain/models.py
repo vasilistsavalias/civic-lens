@@ -9,6 +9,7 @@ Stance = Literal["for", "neutral", "against"]
 DashboardMode = Literal["basic", "advanced"]
 ProposalStatus = Literal["planned", "active", "delayed", "completed"]
 ServiceType = Literal["water", "electricity", "traffic", "waste", "telecom"]
+OffenseTarget = Literal["individual", "group", "untargeted", "unknown"]
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,13 @@ class Stage1Result:
     tags: list[str] = field(default_factory=list)
     agent_scores: dict[str, float] = field(default_factory=dict)
     agent_labels: dict[str, str] = field(default_factory=dict)
+    emotion_scores: dict[str, float] = field(default_factory=dict)
+    emotion_intensity: float = 0.0
+    calibrated_scores: dict[str, float] = field(default_factory=dict)
+    abstain_flags: dict[str, bool] = field(default_factory=dict)
+    conflict_flags: list[str] = field(default_factory=list)
+    review_reason_codes: list[str] = field(default_factory=list)
+    offense_target: OffenseTarget = "unknown"
 
 
 @dataclass(frozen=True)

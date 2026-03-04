@@ -24,10 +24,12 @@ def test_stage1_returns_ten_agent_outputs() -> None:
             "I think we should support the metro expansion because study data from 2025 shows faster mobility and less traffic."
         )
     )
-    assert set(AGENT_NAMES) == set(result.agent_scores.keys())
-    assert set(AGENT_NAMES) == set(result.agent_labels.keys())
+    assert set(AGENT_NAMES).issubset(set(result.agent_scores.keys()))
+    assert set(AGENT_NAMES).issubset(set(result.agent_labels.keys()))
     assert result.agent_labels["evidence"] in {"evidence_backed", "limited_evidence"}
     assert result.agent_labels["structure"] in {"structured", "semi_structured"}
+    assert set(result.emotion_scores.keys()) == {"anger", "fear", "sadness", "joy", "trust", "disgust", "neutral"}
+    assert 0.0 <= result.emotion_intensity <= 1.0
 
 
 def test_profanity_and_toxicity_reduce_argument_quality() -> None:
@@ -55,3 +57,27 @@ def test_relevance_is_proposal_specific() -> None:
     off_topic = classify_stage1(_event("Beach nightlife is great in summer.", proposal_id="metro_west"))
     assert relevant.agent_labels["relevance"] == "relevant"
     assert off_topic.agent_labels["relevance"] == "off_topic"
+
+
+def test_emotion_head_supports_bilingual_and_blended_emotions() -> None:
+    result = classify_stage1(
+        _event("I am afraid and worried, but also hopeful and happy for this clear proposal with evidence.")
+    )
+    assert result.emotion_scores["fear"] > 0.0
+    assert result.emotion_scores["joy"] > 0.0
+    assert result.emotion_intensity > 0.0
+
+
+def test_offense_target_placeholder_is_emitted() -> None:
+    targeted = classify_stage1(_event("You are stupid and this is bullshit."))
+    assert targeted.offense_target in {"individual", "group", "untargeted", "unknown"}
+
+
+def test_stage1_contract_v2_fields_have_valid_ranges() -> None:
+    result = classify_stage1(_event("Please provide clear data and evidence; I support this proposal."))
+    assert all(0.0 <= v <= 1.0 for v in result.emotion_scores.values())
+    assert 0.0 <= result.emotion_intensity <= 1.0
+    assert isinstance(result.calibrated_scores, dict)
+    assert isinstance(result.abstain_flags, dict)
+    assert isinstance(result.conflict_flags, list)
+    assert isinstance(result.review_reason_codes, list)

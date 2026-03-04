@@ -35,6 +35,18 @@ def test_initial_and_final_stage_payloads_are_available(tmp_path) -> None:
 
     assert initial
     assert final
+    required_stage1_contract_keys = {
+        "emotion_scores",
+        "emotion_intensity",
+        "agent_scores",
+        "agent_labels",
+        "calibrated_scores",
+        "abstain_flags",
+        "conflict_flags",
+        "review_reason_codes",
+        "offense_target",
+    }
+    assert required_stage1_contract_keys.issubset(set(initial[0].keys()))
     assert all("review_status" in row for row in final)
     assert isinstance(corrections, list)
     assert "correction_rate" in metrics
