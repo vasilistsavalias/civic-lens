@@ -11,6 +11,12 @@ This project models a two-stage architecture for processing resident comments an
   - Stance detection
   - Irony/sarcasm detection
   - Argument quality scoring
+  - Profanity detection
+  - Toxicity scoring
+  - Civility scoring
+  - Argument structure scoring
+  - Evidence support scoring
+  - Topical relevance scoring
 - Stage 2 proposal-level analysis:
   - Topic/theme clustering
   - Trend analysis over time
@@ -20,6 +26,8 @@ This project models a two-stage architecture for processing resident comments an
 ## Core Objective
 
 Turn high-volume civic feedback into structured, proposal-level insight that municipalities can monitor in near real time and use for decision support.
+
+Research grounding for Stage-1 agent definitions is documented in [docs/research/agent_rubric.md](./docs/research/agent_rubric.md).
 
 ## Architecture (Mermaid)
 
@@ -48,7 +56,7 @@ flowchart TD
 
     subgraph STORE1[" "]
         ST1T["PER-COMMENT RESULTS STORE"]
-        CRS[("sentiment · stance · irony flag · argument quality score\none record per comment")]
+        CRS[("sentiment Â· stance Â· irony flag Â· argument quality score\none record per comment")]
     end
 
     subgraph STAGE2[" "]
