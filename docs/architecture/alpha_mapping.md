@@ -9,9 +9,23 @@
 - Card click orchestration -> `AlphaPipeline.open_card(proposal_id)`
 - Ingestion/validation -> `submit_comment(...)` + `validate_event(...)`
 - Stage 1 agent simulation -> `classify_stage1(...)`
-- Stage 2 aggregation -> `_build_insight(...)`
+- Reviewer correction pass -> `apply_mock_reviewer_pass(...)`
+- Stage 2 aggregation -> `_build_insight(...)` from reviewed rows
+- Artifact contract emission -> `PipelineArtifacts` via pipeline stage hooks
 - Freshness policy -> `_dirty_proposals` + `_ensure_fresh(...)`
 - Dashboard chart contract -> `build_dashboard_data(mode, proposal_id, service_filter)`
+
+## Artifact Contract Mapping (Mock Blueprint)
+- Run root: `artifacts/pipeline_runs/<run_id>/`
+- Proposal stage folders:
+  - `raw/comments.json`
+  - `segments/comment_segments.json`
+  - `analysis/initial/stage1_results.json` + `.csv`
+  - `analysis/final/stage1_results.json` + `.csv`
+  - `analysis/final/corrections.json`
+  - `analysis/final/review_metrics.json`
+  - `analysis/final/stage2_insight.json`
+  - `analysis/visuals/dashboard_<mode>.json`
 
 ## UI Mapping
 - Card-first interface + dashboards: `app.py`
