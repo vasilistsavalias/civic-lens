@@ -1,13 +1,16 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import asdict
 from datetime import datetime
 from itertools import count
+from pathlib import Path
 
 from alpha_app.config import MUNICIPALITY_ID, REACTION_KEYS
+from alpha_app.core.artifacts import PipelineArtifacts
 from alpha_app.core.mock_engine import classify_stage1, validate_event
 from alpha_app.core.proposals import PROPOSALS, SEEDED_COMMENTS
+from alpha_app.core.review import apply_mock_reviewer_pass
 from alpha_app.domain.models import (
     CommentEvent,
     DashboardOverviewSeries,
@@ -21,13 +24,24 @@ from alpha_app.domain.models import (
 
 
 class AlphaPipeline:
-    def __init__(self, proposals: list[Proposal] | None = None) -> None:
+    def __init__(
+        self,
+        proposals: list[Proposal] | None = None,
+        *,
+        emit_artifacts: bool = False,
+        artifact_root: Path | str | None = None,
+        run_id: str | None = None,
+    ) -> None:
         proposal_list = proposals or PROPOSALS
         self.proposals = {p.proposal_id: p for p in proposal_list}
         self.pending_events: list[CommentEvent] = []
         self.comments: list[CommentEvent] = []
         self.stage1_results: dict[str, Stage1Result] = {}
         self.stage2_insights: dict[str, Stage2Insight] = {}
+        self.review_initial_rows: dict[str, list[dict[str, object]]] = {}
+        self.review_final_rows: dict[str, list[dict[str, object]]] = {}
+        self.review_corrections: dict[str, list[dict[str, object]]] = {}
+        self.review_metrics: dict[str, dict[str, object]] = {}
         self.reaction_totals: dict[str, dict[str, int]] = defaultdict(lambda: {k: 0 for k in REACTION_KEYS})
         self._dirty_proposals: set[str] = set()
         self._id_counter = count(1)
@@ -37,6 +51,7 @@ class AlphaPipeline:
         self.queue_snapshots: list[dict[str, object]] = []
         self.store_snapshots: list[dict[str, object]] = []
         self.scheduler_triggers: list[dict[str, object]] = []
+        self._artifact_store = PipelineArtifacts(root=artifact_root, run_id=run_id) if emit_artifacts else None
         self.seed_demo_data()
 
     def _snapshot_queue(self, processed_in_batch: int = 0) -> None:
@@ -63,7 +78,7 @@ class AlphaPipeline:
         comment_text: str,
         reactions: dict[str, int] | None = None,
         *,
-        author_name: str = "Κάτοικος",
+        author_name: str = "ÎšÎ¬Ï„Î¿Î¹ÎºÎ¿Ï‚",
         comment_id: str | None = None,
         submitted_at: datetime | None = None,
     ) -> CommentEvent:
@@ -92,6 +107,7 @@ class AlphaPipeline:
             self.reaction_totals[proposal_id][key] += value
         self._dirty_proposals.add(proposal_id)
         self._snapshot_queue(processed_in_batch=0)
+        self._emit_ingestion_artifacts(proposal_id)
         return event
 
     def seed_demo_data(self) -> None:
@@ -121,8 +137,17 @@ class AlphaPipeline:
     def _ensure_fresh(self, proposal_id: str) -> None:
         if proposal_id not in self.stage2_insights or proposal_id in self._dirty_proposals:
             processed = self._process_pending_for_proposal(proposal_id)
-            self.stage2_insights[proposal_id] = self._build_insight(proposal_id)
+            comments = [comment for comment in self.comments if comment.proposal_id == proposal_id]
+            by_id = {result.comment_id: result for result in self.stage1_results.values() if result.proposal_id == proposal_id}
+            ordered_results = [by_id[comment.comment_id] for comment in comments if comment.comment_id in by_id]
+            initial_rows, final_rows, corrections, metrics = apply_mock_reviewer_pass(proposal_id, comments, ordered_results)
+            self.review_initial_rows[proposal_id] = initial_rows
+            self.review_final_rows[proposal_id] = final_rows
+            self.review_corrections[proposal_id] = corrections
+            self.review_metrics[proposal_id] = metrics
+            self.stage2_insights[proposal_id] = self._build_insight(proposal_id, reviewed_rows=final_rows)
             self._compute_scheduler_for(proposal_id)
+            self._emit_analysis_artifacts(proposal_id)
             self._dirty_proposals.discard(proposal_id)
             self._snapshot_queue(processed_in_batch=processed)
             self._snapshot_store()
@@ -141,21 +166,23 @@ class AlphaPipeline:
             result = classify_stage1(event)
             self.stage1_results[event.comment_id] = result
         return len(batch)
-
-    def _build_insight(self, proposal_id: str) -> Stage2Insight:
-        scoped = [r for r in self.stage1_results.values() if r.proposal_id == proposal_id]
-        topic_counter: Counter[str] = Counter()
-        for result in scoped:
-            topic_counter.update(result.tags)
+    def _build_insight(self, proposal_id: str, *, reviewed_rows: list[dict[str, object]]) -> Stage2Insight:
+        topic_counter: Counter[str] = Counter(
+            str(row["topic_context"]) for row in reviewed_rows if row.get("topic_context") and row["topic_context"] != "other"
+        )
         top_topics = [topic for topic, _ in topic_counter.most_common(5)] or ["general_feedback"]
 
-        sentiment_counts = Counter(result.sentiment for result in scoped)
+        sentiment_counts = Counter(str(row.get("sentiment", "neutral")) for row in reviewed_rows)
         dominant = sentiment_counts.most_common(1)[0][0] if sentiment_counts else "neutral"
-        avg_quality = sum(r.argument_quality_score for r in scoped) / len(scoped) if scoped else 0.0
+        avg_quality = (
+            sum(float(row.get("argument_quality_score", 0.0)) for row in reviewed_rows) / len(reviewed_rows)
+            if reviewed_rows
+            else 0.0
+        )
 
-        trend_summary = f"Κυρίαρχο συναίσθημα: {dominant}. Μέση ποιότητα επιχειρημάτων: {avg_quality:.2f}."
+        trend_summary = f"Dominant sentiment: {dominant}. Average argument quality: {avg_quality:.2f}."
         executive_summary = (
-            f"Η πρόταση '{self.proposals[proposal_id].title}' συγκεντρώνει {len(scoped)} σχόλια με κύρια θέματα: "
+            f"Proposal '{self.proposals[proposal_id].title}' includes {len(reviewed_rows)} reviewed comments with top topics: "
             f"{', '.join(top_topics)}."
         )
         return Stage2Insight(
@@ -213,17 +240,22 @@ class AlphaPipeline:
         sentiment_rows: list[dict[str, object]] = []
         trend_rows: list[dict[str, object]] = []
         service_rows: list[dict[str, object]] = []
+        quality_rows: list[dict[str, object]] = []
 
         for pid, proposal in self.proposals.items():
             comments = [c for c in self.comments if c.proposal_id == pid]
             results = [self.stage1_results[c.comment_id] for c in comments if c.comment_id in self.stage1_results]
+            reviewed = self.review_final_rows.get(pid, [])
             reactions = self.reaction_totals[pid]
             total_reactions = sum(reactions.values())
             support_ratio = 0.0 if total_reactions == 0 else (reactions["likes"] + reactions["support"]) / total_reactions
 
             comparison_rows.append({"proposal_id": pid, "title": proposal.title, "comments_total": len(comments), "total_reactions": total_reactions, "support_ratio": round(support_ratio, 2)})
 
-            sentiment_counts = Counter(r.sentiment for r in results)
+            if reviewed:
+                sentiment_counts = Counter(str(row.get("sentiment", "neutral")) for row in reviewed)
+            else:
+                sentiment_counts = Counter(r.sentiment for r in results)
             for label in ["positive", "neutral", "negative"]:
                 sentiment_rows.append({"title": proposal.title, "sentiment": label, "count": sentiment_counts.get(label, 0)})
 
@@ -238,26 +270,57 @@ class AlphaPipeline:
                 if service_filter and service not in service_filter:
                     continue
                 service_rows.append({"service": service, "title": proposal.title, "impact": len(comments)})
+            quality_metric = self.review_metrics.get(pid, {})
+            if quality_metric:
+                quality_rows.append(
+                    {
+                        "proposal_id": pid,
+                        "title": proposal.title,
+                        "correction_rate": float(quality_metric.get("correction_rate", 0.0)),
+                        "unresolved_rate": float(quality_metric.get("unresolved_rate", 0.0)),
+                        "avg_review_lag_sec": float(quality_metric.get("avg_review_lag_sec", 0.0)),
+                    }
+                )
 
         overview = DashboardOverviewSeries(
             proposal_comparison=comparison_rows,
             sentiment_by_proposal=sentiment_rows,
             trend_points=trend_rows,
             service_impact=service_rows,
+            quality_telemetry=quality_rows,
             insight_line="Overview: highest participation appears in mobility-heavy proposals.",
         )
 
         scoped_comments = [c for c in self.comments if c.proposal_id == target_id]
         scoped_results = [self.stage1_results[c.comment_id] for c in scoped_comments if c.comment_id in self.stage1_results]
-        sentiment_dist = Counter(r.sentiment for r in scoped_results)
+        reviewed_target = self.review_final_rows.get(target_id, [])
+        sentiment_dist = Counter(str(row.get("sentiment", "neutral")) for row in reviewed_target) if reviewed_target else Counter(r.sentiment for r in scoped_results)
         stance_dist = Counter(r.stance for r in scoped_results)
         topic_counter: Counter[str] = Counter()
-        for result in scoped_results:
-            topic_counter.update(result.tags)
+        if reviewed_target:
+            for row in reviewed_target:
+                topic = str(row.get("topic_context", ""))
+                if topic and topic != "other":
+                    topic_counter.update([topic])
+        else:
+            for result in scoped_results:
+                topic_counter.update(result.tags)
 
         reaction_velocity = []
         for comment in sorted(scoped_comments, key=lambda c: c.submitted_at):
             reaction_velocity.append({"timestamp": comment.submitted_at.strftime("%Y-%m-%d %H:%M"), "total_reacts": sum(comment.reactions.values())})
+
+        metrics = self.review_metrics.get(target_id, {})
+        indicator_rates = metrics.get("indicator_rates", {}) if isinstance(metrics, dict) else {}
+        correction_by_indicator = [{"indicator": str(k), "correction_rate": float(v)} for k, v in dict(indicator_rates).items()]
+        review_state_mix = []
+        if metrics:
+            review_state_mix = [
+                {"state": "corrected", "count": int(metrics.get("corrected_items", 0))},
+                {"state": "unchanged", "count": int(metrics.get("unchanged_items", 0))},
+                {"state": "unresolved", "count": int(metrics.get("unresolved_items", 0))},
+            ]
+        review_lag_points = [{"comment_id": str(row.get("comment_id", "")), "lag_sec": float(row.get("review_lag_sec", 0.0))} for row in reviewed_target]
 
         proposal_series = DashboardProposalSeries(
             proposal_id=target_id,
@@ -266,8 +329,12 @@ class AlphaPipeline:
             reaction_velocity=reaction_velocity,
             topic_prevalence=[{"topic": k, "count": v} for k, v in topic_counter.most_common(8)],
             argument_quality_distribution=[{"comment_id": r.comment_id, "score": r.argument_quality_score} for r in scoped_results],
+            correction_by_indicator=correction_by_indicator,
+            review_state_mix=review_state_mix,
+            review_lag_points=review_lag_points,
             insight_line=("Proposal insight: advanced view enabled." if mode == "advanced" else "Proposal insight: basic KPI view."),
         )
+        self._emit_visual_artifacts(target_id, mode=mode, overview=overview, proposal=proposal_series)
         return overview, proposal_series
 
     def architecture_metrics(self) -> dict[str, list[dict[str, object]]]:
@@ -360,4 +427,87 @@ class AlphaPipeline:
     def dashboard_payload(self, mode: str = "basic") -> dict[str, object]:
         overview, proposal_series = self.build_dashboard_data(mode=mode)
         return {"overview": asdict(overview), "proposal": asdict(proposal_series)}
+
+    @property
+    def artifact_run_id(self) -> str | None:
+        if not self._artifact_store:
+            return None
+        return self._artifact_store.run_id
+
+    @property
+    def artifact_root(self) -> str | None:
+        if not self._artifact_store:
+            return None
+        return str(self._artifact_store.root)
+
+    def validate_artifact_contract(self, proposal_id: str) -> list[str]:
+        if not self._artifact_store:
+            return []
+        return self._artifact_store.missing_contract_files(proposal_id)
+
+    def read_analysis_initial_from_artifacts(self, proposal_id: str) -> list[dict[str, object]]:
+        if not self._artifact_store:
+            return []
+        return self._artifact_store.read_json(proposal_id, "analysis/initial/stage1_results.json")
+
+    def read_analysis_final_from_artifacts(self, proposal_id: str) -> list[dict[str, object]]:
+        if not self._artifact_store:
+            return []
+        return self._artifact_store.read_json(proposal_id, "analysis/final/stage1_results.json")
+
+    def read_corrections_from_artifacts(self, proposal_id: str) -> list[dict[str, object]]:
+        if not self._artifact_store:
+            return []
+        return self._artifact_store.read_json(proposal_id, "analysis/final/corrections.json")
+
+    def read_review_metrics_from_artifacts(self, proposal_id: str) -> dict[str, object]:
+        if not self._artifact_store:
+            return {}
+        return self._artifact_store.read_json(proposal_id, "analysis/final/review_metrics.json")
+
+    def read_visual_payload_from_artifacts(self, proposal_id: str, *, mode: str = "basic") -> dict[str, object]:
+        if not self._artifact_store:
+            return {}
+        return self._artifact_store.read_json(proposal_id, f"analysis/visuals/dashboard_{mode}.json")
+
+    def _emit_ingestion_artifacts(self, proposal_id: str) -> None:
+        if not self._artifact_store:
+            return
+        comments = [comment for comment in self.comments if comment.proposal_id == proposal_id]
+        self._artifact_store.write_ingestion_artifacts(proposal_id, comments)
+
+    def _emit_analysis_artifacts(self, proposal_id: str) -> None:
+        if not self._artifact_store:
+            return
+        initial_rows = self.review_initial_rows.get(proposal_id, [])
+        final_rows = self.review_final_rows.get(proposal_id, [])
+        corrections = self.review_corrections.get(proposal_id, [])
+        review_metrics = self.review_metrics.get(proposal_id, {})
+        insight = self.stage2_insights[proposal_id]
+        self._artifact_store.write_analysis_artifacts(
+            proposal_id,
+            initial_rows=initial_rows,
+            final_rows=final_rows,
+            corrections=corrections,
+            review_metrics=review_metrics,
+            insight=insight,
+        )
+
+    def _emit_visual_artifacts(
+        self,
+        proposal_id: str,
+        *,
+        mode: str,
+        overview: DashboardOverviewSeries,
+        proposal: DashboardProposalSeries,
+    ) -> None:
+        if not self._artifact_store:
+            return
+        self._artifact_store.write_visual_payload(
+            proposal_id,
+            mode=mode,
+            overview=overview,
+            proposal=proposal,
+        )
+
 

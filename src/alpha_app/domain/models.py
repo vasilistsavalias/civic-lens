@@ -96,6 +96,7 @@ class DashboardOverviewSeries:
     trend_points: list[dict[str, object]]
     service_impact: list[dict[str, object]]
     insight_line: str
+    quality_telemetry: list[dict[str, object]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -107,4 +108,7 @@ class DashboardProposalSeries:
     topic_prevalence: list[dict[str, object]]
     argument_quality_distribution: list[dict[str, object]]
     insight_line: str
+    correction_by_indicator: list[dict[str, object]] = field(default_factory=list)
+    review_state_mix: list[dict[str, object]] = field(default_factory=list)
+    review_lag_points: list[dict[str, object]] = field(default_factory=list)
 
