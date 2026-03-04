@@ -7,6 +7,6 @@ from alpha_app.core.pipeline import AlphaPipeline
 
 def get_pipeline() -> AlphaPipeline:
     if "alpha_pipeline" not in st.session_state:
-        st.session_state["alpha_pipeline"] = AlphaPipeline()
+        st.session_state["alpha_pipeline"] = AlphaPipeline(emit_artifacts=True)
     return st.session_state["alpha_pipeline"]
 
