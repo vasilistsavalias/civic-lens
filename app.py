@@ -11,11 +11,15 @@ import bootstrap_path  # noqa: F401
 from alpha_app.config import MUNICIPALITY_NAME, SERVICE_LABELS, STATUS_LABELS
 from alpha_app.domain.models import ProposalExpandedViewModel
 from alpha_app.ui.charts import (
+    arch_abstain_summary_fig,
     arch_agent_confidence_fig,
     arch_agent_outputs_fig,
     arch_api_validation_fig,
     arch_bypass_vs_nlp_fig,
+    arch_calibration_fig,
     arch_classifier_vs_llm_fig,
+    arch_conflict_summary_fig,
+    arch_emotion_distribution_fig,
     arch_queue_timeline_fig,
     arch_scheduler_trigger_fig,
     arch_store_freshness_fig,
@@ -363,6 +367,32 @@ def render_dashboards(selected_proposal_id: str | None) -> None:
         "Δείχνει πόσες φορές θα ενεργοποιούνταν οι αναλύσεις με κανόνες ανά πλήθος σχολίων ή χρονικό διάστημα.",
     )
     st.plotly_chart(arch_scheduler_trigger_fig(arch["scheduler_triggers"]), use_container_width=True)
+    a9, a10 = st.columns(2)
+    with a9:
+        section_title(
+            "Calibration metrics",
+            "Proxy calibration metrics (ECE/Brier) per analysis head.",
+        )
+        st.plotly_chart(arch_calibration_fig(arch["calibration_metrics"]), use_container_width=True)
+    with a10:
+        section_title(
+            "Emotion distribution",
+            "Distribution of dominant detected emotions across processed comments.",
+        )
+        st.plotly_chart(arch_emotion_distribution_fig(arch["emotion_distribution"]), use_container_width=True)
+    a11, a12 = st.columns(2)
+    with a11:
+        section_title(
+            "Abstain / review reasons",
+            "Why comments are routed to reviewer instead of auto-action.",
+        )
+        st.plotly_chart(arch_abstain_summary_fig(arch["abstain_summary"]), use_container_width=True)
+    with a12:
+        section_title(
+            "Conflict summary",
+            "Counts of conflicts such as irony-sentiment-stance mismatches.",
+        )
+        st.plotly_chart(arch_conflict_summary_fig(arch["conflict_summary"]), use_container_width=True)
 
 
 render_cards()

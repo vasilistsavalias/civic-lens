@@ -206,6 +206,43 @@ def arch_scheduler_trigger_fig(rows: list[dict[str, object]]) -> go.Figure:
     )
 
 
+def arch_calibration_fig(rows: list[dict[str, object]]) -> go.Figure:
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return go.Figure()
+    melted = df.melt(id_vars=["head"], value_vars=["ece_proxy", "brier_proxy"], var_name="metric", value_name="value")
+    return px.bar(
+        melted,
+        x="head",
+        y="value",
+        color="metric",
+        barmode="group",
+        title="Calibration health by head",
+        labels={"head": "Head", "value": "Value", "metric": "Metric"},
+    )
+
+
+def arch_abstain_summary_fig(rows: list[dict[str, object]]) -> go.Figure:
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return go.Figure()
+    return px.bar(df, x="reason", y="count", title="Abstain / review reasons", labels={"reason": "Reason", "count": "Count"})
+
+
+def arch_conflict_summary_fig(rows: list[dict[str, object]]) -> go.Figure:
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return go.Figure()
+    return px.bar(df, x="conflict", y="count", title="Conflict types", labels={"conflict": "Conflict", "count": "Count"})
+
+
+def arch_emotion_distribution_fig(rows: list[dict[str, object]]) -> go.Figure:
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return go.Figure()
+    return px.pie(df, names="emotion", values="count", title="Emotion distribution")
+
+
 def overview_quality_fig(series: DashboardOverviewSeries) -> go.Figure:
     df = pd.DataFrame(series.quality_telemetry)
     if df.empty:
