@@ -13,6 +13,7 @@ Audience: Both
 - [ai_ml.md](./ai_ml.md)
 - [pipeline_math_algorithms.md](./pipeline_math_algorithms.md)
 - [final_system_spec.md](./final_system_spec.md)
+- [comment_pipeline_story.md](./comment_pipeline_story.md)
 - [observability.md](./observability.md)
 - [deployment.md](./deployment.md)
 - [testing.md](./testing.md)
@@ -23,6 +24,7 @@ Audience: Both
 - [research_ground_truth.md](./research_ground_truth.md)
 - [pipeline_math_algorithms.md](./pipeline_math_algorithms.md)
 - [final_system_spec.md](./final_system_spec.md)
+- [comment_pipeline_story.md](./comment_pipeline_story.md)
 
 ## Research
 - [research_ground_truth.md](./research_ground_truth.md)
