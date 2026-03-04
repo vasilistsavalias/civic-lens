@@ -1,13 +1,14 @@
 ﻿from __future__ import annotations
 
 from collections import Counter, defaultdict
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime
 from itertools import count
 from pathlib import Path
 
 from alpha_app.config import MUNICIPALITY_ID, REACTION_KEYS
 from alpha_app.core.artifacts import PipelineArtifacts
+from alpha_app.core.calibration import brier_proxy, calibrate_scores, ece_proxy, mean_entropy
 from alpha_app.core.mock_engine import classify_stage1, validate_event
 from alpha_app.core.proposals import PROPOSALS, SEEDED_COMMENTS
 from alpha_app.core.review import apply_mock_reviewer_pass
@@ -51,6 +52,9 @@ class AlphaPipeline:
         self.queue_snapshots: list[dict[str, object]] = []
         self.store_snapshots: list[dict[str, object]] = []
         self.scheduler_triggers: list[dict[str, object]] = []
+        self.calibration_metrics: list[dict[str, object]] = []
+        self.abstain_summary: list[dict[str, object]] = []
+        self.conflict_summary: list[dict[str, object]] = []
         self._artifact_store = PipelineArtifacts(root=artifact_root, run_id=run_id) if emit_artifacts else None
         self.seed_demo_data()
 
@@ -163,9 +167,60 @@ class AlphaPipeline:
         self.pending_events = keep
 
         for event in batch:
-            result = classify_stage1(event)
+            result = self._enrich_stage1_result(classify_stage1(event))
             self.stage1_results[event.comment_id] = result
         return len(batch)
+
+    def _can_auto_action(self, result: Stage1Result) -> bool:
+        toxicity = float(result.agent_scores.get("toxicity", 0.0))
+        profanity = float(result.agent_scores.get("profanity", 0.0))
+        # Guardrail: profanity-only signal cannot force automatic suppression.
+        if profanity > 0 and toxicity < 0.55:
+            return True
+        if toxicity >= 0.75:
+            return False
+        if toxicity >= 0.55 and result.offense_target in {"individual", "group"}:
+            return False
+        return True
+
+    def _enrich_stage1_result(self, result: Stage1Result) -> Stage1Result:
+        calibrated = calibrate_scores(result.agent_scores)
+        max_prob = max(calibrated.values()) if calibrated else result.confidence
+        entropy = mean_entropy(calibrated, heads={"sentiment", "stance", "irony", "toxicity", "emotion"})
+        toxicity = float(calibrated.get("toxicity", result.agent_scores.get("toxicity", 0.0)))
+        irony_conflict = bool(
+            result.irony_flag
+            and (
+                (result.sentiment == "positive" and result.stance == "against")
+                or (result.sentiment == "negative" and result.stance == "for")
+            )
+        )
+        stance_sentiment_conflict = bool(
+            (result.sentiment == "positive" and result.stance == "against")
+            or (result.sentiment == "negative" and result.stance == "for")
+        )
+
+        abstain_flags = {
+            "low_confidence": max_prob < 0.55,
+            "high_entropy": entropy > 0.95,
+            "irony_conflict": irony_conflict,
+            "offense_gray_zone": 0.45 <= toxicity <= 0.65,
+            "policy_block": not self._can_auto_action(result),
+        }
+        review_reason_codes = [f"REVIEW_{k.upper()}" for k, enabled in abstain_flags.items() if enabled]
+        conflict_flags: list[str] = []
+        if irony_conflict:
+            conflict_flags.append("irony_sentiment_stance_conflict")
+        if stance_sentiment_conflict:
+            conflict_flags.append("sentiment_stance_conflict")
+
+        return replace(
+            result,
+            calibrated_scores=calibrated,
+            abstain_flags=abstain_flags,
+            conflict_flags=conflict_flags,
+            review_reason_codes=review_reason_codes,
+        )
 
     def _build_insight(self, proposal_id: str, *, reviewed_rows: list[dict[str, object]]) -> Stage2Insight:
         topic_counter: Counter[str] = Counter(
@@ -362,10 +417,25 @@ class AlphaPipeline:
                 agent_confidence.append({"agent": "irony", "value": 0.78 if result.irony_flag else 0.62})
                 agent_confidence.append({"agent": "argument_quality", "value": result.argument_quality_score})
 
+        emotion_distribution: Counter[str] = Counter()
+        abstain_counter: Counter[str] = Counter()
+        conflict_counter: Counter[str] = Counter()
+        all_calibrated: list[dict[str, float]] = []
+        for result in results:
+            if result.agent_labels.get("emotion"):
+                emotion_distribution.update([str(result.agent_labels["emotion"])])
+            for flag, enabled in result.abstain_flags.items():
+                if enabled:
+                    abstain_counter.update([flag])
+            for conflict in result.conflict_flags:
+                conflict_counter.update([conflict])
+            if result.calibrated_scores:
+                all_calibrated.append(result.calibrated_scores)
+
         agent_outputs = [{"agent": agent, "label": label, "count": count} for (agent, label), count in sorted(label_counts.items())]
 
         classifier_agents = {"sentiment", "stance", "profanity", "toxicity", "relevance"}
-        llm_agents = {"irony", "argument_quality", "civility", "structure", "evidence"}
+        llm_agents = {"emotion", "irony", "argument_quality", "civility", "structure", "evidence", "clarity"}
         classifier_values = [float(x["value"]) for x in agent_confidence if str(x["agent"]) in classifier_agents]
         llm_values = [float(x["value"]) for x in agent_confidence if str(x["agent"]) in llm_agents]
 
@@ -381,6 +451,25 @@ class AlphaPipeline:
                 "avg_confidence": round(sum(llm_values) / max(1, len(llm_values)), 2),
             },
         ]
+        calibration_rows: list[dict[str, object]] = []
+        if all_calibrated:
+            merged: dict[str, list[float]] = defaultdict(list)
+            for row in all_calibrated:
+                for head, value in row.items():
+                    merged[head].append(float(value))
+            for head, values in merged.items():
+                head_scores = {f"sample_{idx:04d}": val for idx, val in enumerate(values)}
+                calibration_rows.append(
+                    {
+                        "head": head,
+                        "ece_proxy": ece_proxy(head_scores),
+                        "brier_proxy": brier_proxy(head_scores),
+                        "avg_confidence": round(sum(values) / max(1, len(values)), 4),
+                    }
+                )
+        abstain_rows = [{"reason": reason, "count": count} for reason, count in abstain_counter.items()]
+        conflict_rows = [{"conflict": name, "count": count} for name, count in conflict_counter.items()]
+        emotion_rows = [{"emotion": emotion, "count": count} for emotion, count in emotion_distribution.items()]
 
         bypass_vs_nlp = []
         cumulative_comments = 0
@@ -415,6 +504,10 @@ class AlphaPipeline:
             "agent_outputs": agent_outputs,
             "agent_confidence": agent_confidence,
             "classifier_vs_llm": classifier_vs_llm,
+            "calibration_metrics": calibration_rows or [{"head": "none", "ece_proxy": 0.0, "brier_proxy": 0.0, "avg_confidence": 0.0}],
+            "abstain_summary": abstain_rows or [{"reason": "none", "count": 0}],
+            "conflict_summary": conflict_rows or [{"conflict": "none", "count": 0}],
+            "emotion_distribution": emotion_rows or [{"emotion": "neutral", "count": 0}],
             "api_validation": [{"outcome": "pass", "count": self.validation_stats["pass"]}, {"outcome": "fail", "count": self.validation_stats["fail"]}],
             "queue_timeline": self.queue_snapshots,
             "bypass_vs_nlp": bypass_vs_nlp,
