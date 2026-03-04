@@ -23,8 +23,8 @@ def overview_comparison_fig(series: DashboardOverviewSeries) -> go.Figure:
         y="value",
         color="metric",
         barmode="group",
-        title="Î£ÏÎ³ÎºÏÎ¹ÏƒÎ· Ï€ÏÎ¿Ï„Î¬ÏƒÎµÏ‰Î½",
-        labels={"title": "Î ÏÏŒÏ„Î±ÏƒÎ·", "value": "Î¤Î¹Î¼Î®", "metric": "ÎœÎµÏ„ÏÎ¹ÎºÎ®"},
+        title="Σύγκριση προτάσεων",
+        labels={"title": "Πρόταση", "value": "Τιμή", "metric": "Μετρική"},
     )
 
 
@@ -38,8 +38,8 @@ def overview_sentiment_fig(series: DashboardOverviewSeries) -> go.Figure:
         y="count",
         color="sentiment",
         barmode="stack",
-        title="Î£Ï…Î½Î±Î¯ÏƒÎ¸Î·Î¼Î± Î±Î½Î¬ Ï€ÏÏŒÏ„Î±ÏƒÎ·",
-        labels={"title": "Î ÏÏŒÏ„Î±ÏƒÎ·", "count": "Î Î»Î®Î¸Î¿Ï‚ ÏƒÏ‡Î¿Î»Î¯Ï‰Î½", "sentiment": "Î£Ï…Î½Î±Î¯ÏƒÎ¸Î·Î¼Î±"},
+        title="Συναίσθημα ανά πρόταση",
+        labels={"title": "Πρόταση", "count": "Πλήθος σχολίων", "sentiment": "Συναίσθημα"},
     )
 
 
@@ -53,8 +53,8 @@ def overview_trend_fig(series: DashboardOverviewSeries) -> go.Figure:
         y="comments",
         color="title",
         markers=True,
-        title="Î•Î¾Î­Î»Î¹Î¾Î· ÏƒÏ‡Î¿Î»Î¯Ï‰Î½ ÏƒÏ„Î¿Î½ Ï‡ÏÏŒÎ½Î¿",
-        labels={"date": "Î—Î¼ÎµÏÎ¿Î¼Î·Î½Î¯Î±", "comments": "Î Î»Î®Î¸Î¿Ï‚ ÏƒÏ‡Î¿Î»Î¯Ï‰Î½", "title": "Î ÏÏŒÏ„Î±ÏƒÎ·"},
+        title="Εξέλιξη σχολίων στον χρόνο",
+        labels={"date": "Ημερομηνία", "comments": "Πλήθος σχολίων", "title": "Πρόταση"},
     )
 
 
@@ -68,8 +68,8 @@ def overview_service_fig(series: DashboardOverviewSeries) -> go.Figure:
         y="impact",
         color="title",
         barmode="group",
-        title="Î•Ï€Î¯Î´ÏÎ±ÏƒÎ· Î±Î½Î¬ Ï…Ï€Î·ÏÎµÏƒÎ¯Î±",
-        labels={"service": "Î¥Ï€Î·ÏÎµÏƒÎ¯Î±", "impact": "Î•Ï€Î·ÏÎµÎ±Î¶ÏŒÎ¼ÎµÎ½Î± ÏƒÏ‡ÏŒÎ»Î¹Î±", "title": "Î ÏÏŒÏ„Î±ÏƒÎ·"},
+        title="Επίδραση ανά υπηρεσία",
+        labels={"service": "Υπηρεσία", "impact": "Επηρεαζόμενα σχόλια", "title": "Πρόταση"},
     )
 
 
@@ -81,7 +81,7 @@ def proposal_sentiment_stance_fig(series: DashboardProposalSeries) -> go.Figure:
         fig.add_bar(name="Sentiment", x=sdf["label"], y=sdf["count"])
     if not tdf.empty:
         fig.add_bar(name="Stance", x=tdf["label"], y=tdf["count"])
-    fig.update_layout(barmode="group", title="ÎšÎ±Ï„Î±Î½Î¿Î¼Î® ÏƒÏ…Î½Î±Î¹ÏƒÎ¸Î®Î¼Î±Ï„Î¿Ï‚ ÎºÎ±Î¹ ÏƒÏ„Î¬ÏƒÎ·Ï‚", xaxis_title="ÎšÎ±Ï„Î·Î³Î¿ÏÎ¯Î±", yaxis_title="Î Î»Î®Î¸Î¿Ï‚")
+    fig.update_layout(barmode="group", title="Κατανομή συναισθήματος και στάσης", xaxis_title="Κατηγορία", yaxis_title="Πλήθος")
     return fig
 
 
@@ -93,8 +93,8 @@ def proposal_reaction_velocity_fig(series: DashboardProposalSeries) -> go.Figure
         df,
         x="timestamp",
         y="total_reacts",
-        title="Î¡Ï…Î¸Î¼ÏŒÏ‚ Î±Î½Ï„Î¹Î´ÏÎ¬ÏƒÎµÏ‰Î½ ÏƒÏ„Î¿Î½ Ï‡ÏÏŒÎ½Î¿",
-        labels={"timestamp": "Î§ÏÏŒÎ½Î¿Ï‚", "total_reacts": "Î£ÏÎ½Î¿Î»Î¿ Î±Î½Ï„Î¹Î´ÏÎ¬ÏƒÎµÏ‰Î½"},
+        title="Ρυθμός αντιδράσεων στον χρόνο",
+        labels={"timestamp": "Χρόνος", "total_reacts": "Σύνολο αντιδράσεων"},
     )
 
 
@@ -102,7 +102,7 @@ def proposal_topic_fig(series: DashboardProposalSeries) -> go.Figure:
     df = pd.DataFrame(series.topic_prevalence)
     if df.empty:
         return go.Figure()
-    return px.bar(df, x="topic", y="count", title="ÎšÏ…ÏÎ¯Î±ÏÏ‡Î± Î¸Î­Î¼Î±Ï„Î±", labels={"topic": "Î˜Î­Î¼Î±", "count": "Î Î»Î®Î¸Î¿Ï‚"})
+    return px.bar(df, x="topic", y="count", title="Κυρίαρχα θέματα", labels={"topic": "Θέμα", "count": "Πλήθος"})
 
 
 def proposal_quality_fig(series: DashboardProposalSeries, advanced: bool) -> go.Figure:
@@ -110,36 +110,36 @@ def proposal_quality_fig(series: DashboardProposalSeries, advanced: bool) -> go.
     if df.empty:
         return go.Figure()
     if advanced:
-        return px.violin(df, y="score", box=True, points="all", title="ÎšÎ±Ï„Î±Î½Î¿Î¼Î® Ï€Î¿Î¹ÏŒÏ„Î·Ï„Î±Ï‚ ÎµÏ€Î¹Ï‡ÎµÎ¹ÏÎ·Î¼Î¬Ï„Ï‰Î½ (Ï€ÏÎ¿Ï‡Ï‰ÏÎ·Î¼Î­Î½Î¿)", labels={"score": "Î’Î±Î¸Î¼Î¿Î»Î¿Î³Î¯Î±"})
-    return px.box(df, y="score", points="all", title="ÎšÎ±Ï„Î±Î½Î¿Î¼Î® Ï€Î¿Î¹ÏŒÏ„Î·Ï„Î±Ï‚ ÎµÏ€Î¹Ï‡ÎµÎ¹ÏÎ·Î¼Î¬Ï„Ï‰Î½", labels={"score": "Î’Î±Î¸Î¼Î¿Î»Î¿Î³Î¯Î±"})
+        return px.violin(df, y="score", box=True, points="all", title="Κατανομή ποιότητας επιχειρημάτων (προχωρημένο)", labels={"score": "Βαθμολογία"})
+    return px.box(df, y="score", points="all", title="Κατανομή ποιότητας επιχειρημάτων", labels={"score": "Βαθμολογία"})
 
 
 def arch_agent_outputs_fig(rows: list[dict[str, object]]) -> go.Figure:
     df = pd.DataFrame(rows)
     if df.empty:
         return go.Figure()
-    return px.bar(df, x="agent", y="count", color="label", barmode="group", title="Î‘Ï€Î¿Ï„ÎµÎ»Î­ÏƒÎ¼Î±Ï„Î± Î±Î½Î¬ Ï€ÏÎ¬ÎºÏ„Î¿ÏÎ±", labels={"agent": "Î ÏÎ¬ÎºÏ„Î¿ÏÎ±Ï‚", "count": "Î Î»Î®Î¸Î¿Ï‚", "label": "ÎšÎ±Ï„Î·Î³Î¿ÏÎ¯Î±"})
+    return px.bar(df, x="agent", y="count", color="label", barmode="group", title="Αποτελέσματα ανά πράκτορα", labels={"agent": "Πράκτορας", "count": "Πλήθος", "label": "Κατηγορία"})
 
 
 def arch_agent_confidence_fig(rows: list[dict[str, object]]) -> go.Figure:
     df = pd.DataFrame(rows)
     if df.empty:
         return go.Figure()
-    return px.box(df, x="agent", y="value", points="all", title="Î’Î±Î¸Î¼ÏŒÏ‚ Î²ÎµÎ²Î±Î¹ÏŒÏ„Î·Ï„Î±Ï‚ Î±Î½Î¬ Ï€ÏÎ¬ÎºÏ„Î¿ÏÎ±", labels={"agent": "Î ÏÎ¬ÎºÏ„Î¿ÏÎ±Ï‚", "value": "Î’ÎµÎ²Î±Î¹ÏŒÏ„Î·Ï„Î±"})
+    return px.box(df, x="agent", y="value", points="all", title="Βαθμός βεβαιότητας ανά πράκτορα", labels={"agent": "Πράκτορας", "value": "Βεβαιότητα"})
 
 
 def arch_classifier_vs_llm_fig(rows: list[dict[str, object]]) -> go.Figure:
     df = pd.DataFrame(rows)
     if df.empty:
         return go.Figure()
-    return px.bar(df, x="family", y="workload", color="family", title="ÎšÎ±Ï„Î±Î½Î¿Î¼Î® Ï†ÏŒÏÏ„Î¿Ï…: Ï„Î±Î¾Î¹Î½Î¿Î¼Î·Ï„Î­Ï‚ vs LLM", labels={"family": "ÎŸÎ¹ÎºÎ¿Î³Î­Î½ÎµÎ¹Î±", "workload": "Î¦ÏŒÏÏ„Î¿Ï‚"})
+    return px.bar(df, x="family", y="workload", color="family", title="Κατανομή φόρτου: ταξινομητές vs LLM", labels={"family": "Οικογένεια", "workload": "Φόρτος"})
 
 
 def arch_api_validation_fig(rows: list[dict[str, object]]) -> go.Figure:
     df = pd.DataFrame(rows)
     if df.empty:
         return go.Figure()
-    return px.pie(df, names="outcome", values="count", title="Î‘Ï€Î¿Ï„ÎµÎ»Î­ÏƒÎ¼Î±Ï„Î± ÎµÎ»Î­Î³Ï‡Î¿Ï… API")
+    return px.pie(df, names="outcome", values="count", title="Αποτελέσματα ελέγχου API")
 
 
 def arch_queue_timeline_fig(rows: list[dict[str, object]]) -> go.Figure:
@@ -149,7 +149,7 @@ def arch_queue_timeline_fig(rows: list[dict[str, object]]) -> go.Figure:
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df["timestamp"], y=df["depth"], mode="lines+markers", name="Queue Depth"))
     fig.add_trace(go.Bar(x=df["timestamp"], y=df["throughput"], name="Throughput"))
-    fig.update_layout(title="ÎŸÏ…ÏÎ¬: Î²Î¬Î¸Î¿Ï‚ ÎºÎ±Î¹ ÏÏ…Î¸Î¼ÏŒÏ‚ ÎµÏ€ÎµÎ¾ÎµÏÎ³Î±ÏƒÎ¯Î±Ï‚", xaxis_title="Î§ÏÏŒÎ½Î¿Ï‚", yaxis_title="Î Î»Î®Î¸Î¿Ï‚")
+    fig.update_layout(title="Ουρά: βάθος και ρυθμός επεξεργασίας", xaxis_title="Χρόνος", yaxis_title="Πλήθος")
     return fig
 
 
@@ -160,7 +160,7 @@ def arch_bypass_vs_nlp_fig(rows: list[dict[str, object]]) -> go.Figure:
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df["timestamp"], y=df["reaction_bypass_events"], mode="lines+markers", name="Reaction Bypass"))
     fig.add_trace(go.Scatter(x=df["timestamp"], y=df["nlp_events"], mode="lines+markers", name="NLP Pipeline"))
-    fig.update_layout(title="Î Î±ÏÎ¬ÎºÎ±Î¼ÏˆÎ· Î±Î½Ï„Î¹Î´ÏÎ¬ÏƒÎµÏ‰Î½ vs NLP Î´Î¹Î±Î´ÏÎ¿Î¼Î®", xaxis_title="Î§ÏÏŒÎ½Î¿Ï‚", yaxis_title="Î Î»Î®Î¸Î¿Ï‚")
+    fig.update_layout(title="Παράκαμψη αντιδράσεων vs NLP διαδρομή", xaxis_title="Χρόνος", yaxis_title="Πλήθος")
     return fig
 
 
@@ -171,7 +171,7 @@ def arch_store_volume_fig(rows: list[dict[str, object]]) -> go.Figure:
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df["timestamp"], y=df["stage1_count"], mode="lines+markers", name="Per-Comment Store"))
     fig.add_trace(go.Scatter(x=df["timestamp"], y=df["stage2_count"], mode="lines+markers", name="Dashboard Store"))
-    fig.update_layout(title="ÎŒÎ³ÎºÎ¿Ï‚ Î±Ï€Î¿Î¸Î®ÎºÎµÏ…ÏƒÎ·Ï‚ ÏƒÏ„Î¿Î½ Ï‡ÏÏŒÎ½Î¿", xaxis_title="Î§ÏÏŒÎ½Î¿Ï‚", yaxis_title="Î Î»Î®Î¸Î¿Ï‚ ÎµÎ³Î³ÏÎ±Ï†ÏŽÎ½")
+    fig.update_layout(title="Όγκος αποθήκευσης στον χρόνο", xaxis_title="Χρόνος", yaxis_title="Πλήθος εγγραφών")
     return fig
 
 
@@ -186,8 +186,8 @@ def arch_store_freshness_fig(rows: list[dict[str, object]]) -> go.Figure:
         y="seconds",
         color="metric",
         barmode="group",
-        title="Î¦ÏÎµÏƒÎºÎ¬Î´Î± ÎºÎ±Î¹ ÎºÎ±Î¸Ï…ÏƒÏ„Î­ÏÎ·ÏƒÎ· Î´ÎµÎ´Î¿Î¼Î­Î½Ï‰Î½ dashboard",
-        labels={"proposal_id": "Î ÏÏŒÏ„Î±ÏƒÎ·", "seconds": "Î”ÎµÏ…Ï„ÎµÏÏŒÎ»ÎµÏ€Ï„Î±", "metric": "ÎœÎµÏ„ÏÎ¹ÎºÎ®"},
+        title="Φρεσκάδα και καθυστέρηση δεδομένων dashboard",
+        labels={"proposal_id": "Πρόταση", "seconds": "Δευτερόλεπτα", "metric": "Μετρική"},
     )
 
 
@@ -201,8 +201,8 @@ def arch_scheduler_trigger_fig(rows: list[dict[str, object]]) -> go.Figure:
         y="count",
         color="rule",
         barmode="group",
-        title="Î ÏÎ¿Î³ÏÎ±Î¼Î¼Î±Ï„Î¹ÏƒÎ¼Î­Î½Î± triggers (mockup)",
-        labels={"proposal_id": "Î ÏÏŒÏ„Î±ÏƒÎ·", "count": "Î Î»Î®Î¸Î¿Ï‚ triggers", "rule": "ÎšÎ±Î½ÏŒÎ½Î±Ï‚"},
+        title="Προγραμματισμένα triggers (mockup)",
+        labels={"proposal_id": "Πρόταση", "count": "Πλήθος triggers", "rule": "Κανόνας"},
     )
 
 
@@ -258,4 +258,5 @@ def proposal_review_lag_fig(series: DashboardProposalSeries) -> go.Figure:
         title="Review lag per comment",
         labels={"comment_id": "Comment", "lag_sec": "Lag (sec)"},
     )
+
 

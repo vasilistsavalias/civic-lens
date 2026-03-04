@@ -78,7 +78,7 @@ class AlphaPipeline:
         comment_text: str,
         reactions: dict[str, int] | None = None,
         *,
-        author_name: str = "ÎšÎ¬Ï„Î¿Î¹ÎºÎ¿Ï‚",
+        author_name: str = "Κάτοικος",
         comment_id: str | None = None,
         submitted_at: datetime | None = None,
     ) -> CommentEvent:
@@ -166,7 +166,8 @@ class AlphaPipeline:
             result = classify_stage1(event)
             self.stage1_results[event.comment_id] = result
         return len(batch)
-    def _build_insight(self, proposal_id: str, *, reviewed_rows: list[dict[str, object]]) -> Stage2Insight:
+
+    def _build_insight(self, proposal_id: str, *, reviewed_rows: list[dict[str, object]]) -> Stage2Insight:
         topic_counter: Counter[str] = Counter(
             str(row["topic_context"]) for row in reviewed_rows if row.get("topic_context") and row["topic_context"] != "other"
         )
@@ -509,5 +510,6 @@ class AlphaPipeline:
             overview=overview,
             proposal=proposal,
         )
+
 
 
