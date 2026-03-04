@@ -21,6 +21,7 @@ pytest
 ## Docs (Start Here)
 - Modular docs index: [0.READMEs/00_index.md](./0.READMEs/00_index.md)
 - Research rubric: [docs/research/agent_rubric.md](./docs/research/agent_rubric.md)
+- Rebuilt research blueprint (math + guardrails): [0.READMEs/research_pipeline_blueprint.md](./0.READMEs/research_pipeline_blueprint.md)
 
 ## Architecture In 60 Seconds
 ```text

@@ -1,5 +1,7 @@
 # Research-Backed Stage-1 Agent Rubric (Mockup)
 
+> Updated canonical research baseline: [0.READMEs/research_pipeline_blueprint.md](../../0.READMEs/research_pipeline_blueprint.md)
+
 ## Goal
 
 This mockup stage uses deterministic heuristics, but each heuristic is anchored to open/free primary research so we can iterate in a research -> code -> test loop before production models.

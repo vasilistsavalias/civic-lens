@@ -18,6 +18,7 @@ Audience: Both
 - [performance.md](./performance.md)
 - [security.md](./security.md)
 - [glossary.md](./glossary.md)
+- [research_pipeline_blueprint.md](./research_pipeline_blueprint.md)
 
 ## Research Pack
 - [research_ground_truth/README.md](./research_ground_truth/README.md)
