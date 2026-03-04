@@ -1,0 +1,40 @@
+[
+  {
+    "proposal_id": "nikis_pedestrian",
+    "text": "Please, I disagree respectfully and suggest a pilot first.",
+    "sentiment": "neutral",
+    "stance": "against",
+    "toxicity": "non_toxic",
+    "emotions": ["trust"],
+    "quality_score": 0.66,
+    "slice": "non_offensive_criticism"
+  },
+  {
+    "proposal_id": "metro_west",
+    "text": "Yeah right, brilliant idea as if this will ever work.",
+    "sentiment": "negative",
+    "stance": "against",
+    "toxicity": "non_toxic",
+    "emotions": ["anger"],
+    "quality_score": 0.39
+  },
+  {
+    "proposal_id": "deth_park",
+    "text": "Someone said \"shit plan\", but the data suggests benefits if phased.",
+    "sentiment": "neutral",
+    "stance": "for",
+    "toxicity": "non_toxic",
+    "emotions": ["trust"],
+    "quality_score": 0.62,
+    "slice": "non_offensive_criticism"
+  },
+  {
+    "proposal_id": "metro_west",
+    "text": "I feel sad today about unrelated sports outcomes.",
+    "sentiment": "neutral",
+    "stance": "neutral",
+    "toxicity": "non_toxic",
+    "emotions": ["sadness"],
+    "quality_score": 0.25
+  }
+]

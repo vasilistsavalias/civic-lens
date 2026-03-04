@@ -1,0 +1,32 @@
+[
+  {
+    "id": "polite_disagreement",
+    "proposal_id": "nikis_pedestrian",
+    "text": "Please consider alternatives, I disagree but thank you for opening consultation.",
+    "expect": {"policy_block": false}
+  },
+  {
+    "id": "ironic_attack",
+    "proposal_id": "metro_west",
+    "text": "Yeah right, great plan, as if delays will disappear. I oppose this.",
+    "expect": {"has_review_reason": true}
+  },
+  {
+    "id": "quoted_profanity",
+    "proposal_id": "deth_park",
+    "text": "Someone wrote \"this is bullshit\" in comments, but I think we should still evaluate evidence.",
+    "expect": {"policy_block": false}
+  },
+  {
+    "id": "high_evidence_harsh_tone",
+    "proposal_id": "metro_west",
+    "text": "This is bad and frustrating, but data from 2025 report shows demand. We should proceed with safeguards.",
+    "expect": {"quality_min": 0.3}
+  },
+  {
+    "id": "off_topic_emotion",
+    "proposal_id": "metro_west",
+    "text": "I feel sad about football results this weekend.",
+    "expect": {"relevance_label": "off_topic"}
+  }
+]

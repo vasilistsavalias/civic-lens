@@ -1,0 +1,40 @@
+{
+  "macro_f1": {
+    "sentiment": 0.7091,
+    "stance": 0.4815,
+    "toxicity": 0.4706
+  },
+  "per_class_recall": {
+    "sentiment": {
+      "negative": 0.25,
+      "neutral": 1.0,
+      "positive": 1.0
+    },
+    "stance": {
+      "against": 0.2,
+      "for": 0.5,
+      "neutral": 1.0
+    },
+    "toxicity": {
+      "non_toxic": 1.0,
+      "toxic": 0.0
+    }
+  },
+  "emotion_multilabel_f1": 0.4286,
+  "quality_correlation": {
+    "pearson": 0.7235,
+    "spearman": 0.6205
+  },
+  "calibration": {
+    "ece_proxy": 0.3889,
+    "brier_proxy": 0.1944
+  },
+  "abstain_rate": 0.0,
+  "slice_false_positive_rate_non_offensive_criticism": 0.0,
+  "sample_count": 9,
+  "limitations": [
+    "Public benchmark subset is mapped and reduced for mockup comparability.",
+    "Calibration metrics are proxies without external ground-truth probabilities.",
+    "Quality correlation uses synthetic labels in this phase."
+  ]
+}

@@ -1,0 +1,47 @@
+[
+  {
+    "proposal_id": "metro_west",
+    "text": "Great metro plan, I support this strongly.",
+    "sentiment": "positive",
+    "stance": "for",
+    "toxicity": "non_toxic",
+    "emotions": ["joy", "trust"],
+    "quality_score": 0.78
+  },
+  {
+    "proposal_id": "metro_west",
+    "text": "This is a bad idea and I oppose it.",
+    "sentiment": "negative",
+    "stance": "against",
+    "toxicity": "non_toxic",
+    "emotions": ["anger"],
+    "quality_score": 0.42
+  },
+  {
+    "proposal_id": "nikis_pedestrian",
+    "text": "I worry this change will increase traffic in nearby streets.",
+    "sentiment": "negative",
+    "stance": "against",
+    "toxicity": "non_toxic",
+    "emotions": ["fear"],
+    "quality_score": 0.55
+  },
+  {
+    "proposal_id": "deth_park",
+    "text": "Please evaluate the report data before final approval.",
+    "sentiment": "neutral",
+    "stance": "neutral",
+    "toxicity": "non_toxic",
+    "emotions": ["trust"],
+    "quality_score": 0.72
+  },
+  {
+    "proposal_id": "deth_park",
+    "text": "You are stupid, this is bullshit.",
+    "sentiment": "negative",
+    "stance": "against",
+    "toxicity": "toxic",
+    "emotions": ["anger", "disgust"],
+    "quality_score": 0.18
+  }
+]
